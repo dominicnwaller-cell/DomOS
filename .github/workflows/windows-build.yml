@@ -1,19 +1,35 @@
 name: Build DOM.OS for Windows
+
 on:
   workflow_dispatch:
+
   push:
     branches: [ main ]
+
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
       - uses: dtolnay/rust-toolchain@stable
-      - run: npm install
-      - run: npm run build
+
+      - run: npm ci
+
+      - name: Validate DOM.OS
+        run: npm run validate
+
+      - name: Build signed Windows installers
+        run: npm run build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
       - uses: actions/upload-artifact@v4
         with:
           name: DOM.OS-Windows-Installer
