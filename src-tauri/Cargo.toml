@@ -1,6 +1,6 @@
 [package]
 name = "domos"
-version = "6.1.0"
+version = "6.1.1"
 description = "DOM.OS personal life operating system"
 authors = ["DOM.OS"]
 edition = "2021"

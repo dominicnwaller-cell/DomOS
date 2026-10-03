@@ -1,12 +1,13 @@
 {
   "name": "domos",
   "private": true,
-  "version": "6.1.0",
+  "version": "6.1.1",
   "scripts": {
     "frontend:build": "vite build",
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "tauri build"
+    "build": "npm run validate && tauri build",
+    "validate": "node scripts/validate-domos.mjs"
   },
   "dependencies": {
     "@tauri-apps/plugin-process": "^2.0.0",

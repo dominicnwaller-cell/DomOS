@@ -628,7 +628,7 @@ function popWidget(id){
 /* V5.4.3 connected dashboard summary cards */
 #availableSpendMetric{font-variant-numeric:tabular-nums}
 
-</style></head><body class="popout-shell"><div class="card"><div class="head"><h3>${displayTitle}</h3><span class="muted">DOM.OS Pop-Out</span></div>${w.body()}</div><script type="module" src="/main.js"></script>
+</style></head><body class="popout-shell"><div class="card"><div class="head"><h3>${displayTitle}</h3><span class="muted">DOM.OS Pop-Out</span></div>${w.body()}</div>
 </body></html>`);win.document.close();
  toastMsg(`${displayTitle} popped out`,false)
 }
@@ -1236,4 +1236,6 @@ function saveNoteLive(id){let n=notes.find(x=>x.id===id);if(!n)return;n.title=no
 function deleteNote(id){notes=notes.filter(x=>x.id!==id);activeNoteId=notes[0]?.id||null;store.set('notes',notes);store.set('activeNoteId',activeNoteId);renderNotes();toastMsg('Note deleted')}
 
 function renderAll(){renderDashboard();renderTasks();renderCalendar();renderKeys();renderRoutines();renderFinance();renderGoals();renderNotes()}renderAll();setInterval(updateLiveClock,60000);
-</script></body></html>
+</script>
+<script type="module" src="/main.js"></script>
+</body></html>
