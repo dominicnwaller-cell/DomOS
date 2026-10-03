@@ -1,0 +1,18 @@
+DOM.OS V6.1 updater repaired package
+
+What was fixed:
+- tauri.conf.json rebuilt as valid UTF-8 JSON
+- SETUP-UPDATER now parses JSON and writes UTF-8 without BOM
+- existing signing key is required and preserved
+- Vite src-root fix retained
+- failed builds stop correctly
+
+Steps:
+1. Extract this ZIP.
+2. Copy your EXISTING .domos-signing folder into this repaired project.
+3. Run SETUP-UPDATER.bat once.
+4. Enter dominicnwaller-cell and DomOS.
+5. Run BUILD-WINDOWS-UPDATER.bat.
+6. Enter your existing signing-key password when prompted.
+
+Do not regenerate the signing key.
