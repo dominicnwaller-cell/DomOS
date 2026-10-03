@@ -1,0 +1,50 @@
+﻿{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DOM.OS",
+  "version": "6.1.0",
+  "identifier": "com.dom.os",
+  "build": {
+    "beforeBuildCommand": "npm run frontend:build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "DOM.OS",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi"
+    ],
+    "windows": {},
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERGQTQ5NkZCQTg4NUE5MEIKUldRTHFZV28rNWFrMytNcVMwdjF4RWcxb0VJdk9RaktOZzU2bjZ5Y1dPMElyQ3NQcXFOcTFRYkEK",
+      "endpoints": [
+        "https://github.com/dominicnwaller-cell/DomOS/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
+
