@@ -1,132 +1,69 @@
-﻿import { check } from '@tauri-apps/plugin-updater';
+import { check } from '@tauri-apps/plugin-updater';
+import { getVersion } from '@tauri-apps/api/app';
+import { initV612 } from './v612-ui.js';
+import './v612.css';
 
 let pendingUpdate = null;
 let checking = false;
 let installing = false;
+const listeners = new Set();
 
-function setStatus(text, kind = 'normal') {
-  const el = document.getElementById('updateStatus');
-  if (!el) return;
-
-  el.textContent = text;
-  el.style.color =
-    kind === 'good' ? '#65e6a1' :
-    kind === 'bad' ? '#ff9aa2' : '';
-}
-
-function setButton(text, disabled = false) {
-  const button = document.getElementById('updateButton');
-  if (!button) return;
-
-  button.textContent = text;
-  button.disabled = disabled;
-}
-
-async function checkForUpdates(silent = false) {
-  if (checking || installing) return;
-
-  checking = true;
-
-  try {
-    if (!silent) {
-      setStatus('Checking for updates…');
-      setButton('Checking…', true);
-    }
-
-    const update = await check();
-
-    if (!update) {
-      pendingUpdate = null;
-      setStatus('DOM.OS is up to date.', 'good');
-      setButton('Check for updates', false);
-      return;
-    }
-
-    pendingUpdate = update;
-    setStatus(`Version ${update.version} is available.`);
-    setButton(`Update to ${update.version}`, false);
-
-  } catch (error) {
-    console.error('DOM.OS update check failed:', error);
-    setStatus('Could not check for updates.', 'bad');
-    setButton('Try again', false);
-
-  } finally {
-    checking = false;
-  }
-}
-
-async function updateNow() {
-  if (installing) return;
-
-  if (!pendingUpdate) {
-    await checkForUpdates(false);
-    return;
-  }
-
-  installing = true;
-
-  try {
-    setButton('Downloading update…', true);
-    setStatus(`Downloading DOM.OS ${pendingUpdate.version}…`);
-
-    let downloaded = 0;
-    let total = 0;
-
-    await pendingUpdate.downloadAndInstall(event => {
-      if (event.event === 'Started') {
-        total = event.data.contentLength || 0;
-      }
-
-      if (event.event === 'Progress') {
-        downloaded += event.data.chunkLength || 0;
-
-        const mb = (downloaded / 1024 / 1024).toFixed(1);
-
-        if (total) {
-          const percent = Math.min(
-            100,
-            Math.round((downloaded / total) * 100)
-          );
-
-          setStatus(`Downloading update… ${percent}% · ${mb} MB`);
-        } else {
-          setStatus(`Downloading update… ${mb} MB`);
-        }
-      }
-
-      if (event.event === 'Finished') {
-        setStatus('Download complete. Installing update…');
-      }
-    });
-
-    setStatus('Update installed. Restarting DOM.OS…', 'good');
-
-  } catch (error) {
-    console.error('DOM.OS update failed:', error);
-
-    setStatus('Update failed. Try again.', 'bad');
-    setButton('Try update again', false);
-
-    installing = false;
-  }
-}
-
-window.DOMOSUpdater = {
-  checkForUpdates,
-  updateNow
+const state = {
+  status: 'idle', currentVersion: '', latestVersion: '', available: false,
+  releaseNotes: '', releaseDate: '',
+  lastChecked: localStorage.getItem('domos612.lastUpdateCheck') || '',
+  downloaded: 0, total: 0, progress: 0, error: ''
 };
 
-window.addEventListener('DOMContentLoaded', () => {
-  const button = document.getElementById('updateButton');
+const snapshot = () => ({ ...state, checking, installing });
+function emit(){ const value=snapshot(); for(const listener of listeners){ try{listener(value)}catch(error){console.error(error)} } }
 
-  if (button) {
-    button.addEventListener('click', () => {
-      pendingUpdate
-        ? updateNow()
-        : checkForUpdates(false);
-    });
-  }
+async function loadCurrentVersion(){
+  try{ state.currentVersion = await getVersion(); }
+  catch(error){ console.warn('Could not read DOM.OS version:', error); state.currentVersion='6.1.1'; }
+  emit();
+}
 
-  setTimeout(() => checkForUpdates(true), 2500);
+async function checkForUpdates(silent=false){
+  if(checking||installing) return pendingUpdate;
+  checking=true; state.error=''; if(!silent) state.status='checking'; emit();
+  try{
+    if(pendingUpdate?.close){ try{await pendingUpdate.close()}catch{} }
+    pendingUpdate=await check();
+    state.lastChecked=new Date().toISOString();
+    localStorage.setItem('domos612.lastUpdateCheck',state.lastChecked);
+    if(!pendingUpdate){ state.available=false; state.latestVersion=state.currentVersion; state.releaseNotes=''; state.releaseDate=''; state.status='up-to-date'; return null; }
+    state.available=true; state.latestVersion=pendingUpdate.version||''; state.releaseNotes=pendingUpdate.body||''; state.releaseDate=pendingUpdate.date||''; state.status='available';
+    return pendingUpdate;
+  }catch(error){ console.error('DOM.OS update check failed:',error); state.status='error'; state.error=String(error?.message||error||'Could not check for updates.'); return null; }
+  finally{ checking=false; emit(); }
+}
+
+async function updateNow(){
+  if(installing) return;
+  if(!pendingUpdate){ await checkForUpdates(false); if(!pendingUpdate) return; }
+  installing=true; Object.assign(state,{status:'downloading',downloaded:0,total:0,progress:0,error:''}); emit();
+  try{
+    await pendingUpdate.downloadAndInstall(event=>{
+      if(event.event==='Started'){ state.total=Number(event.data?.contentLength||0); state.downloaded=0; state.progress=0; }
+      if(event.event==='Progress'){ state.downloaded+=Number(event.data?.chunkLength||0); state.progress=state.total?Math.min(100,Math.round(state.downloaded/state.total*100)):0; }
+      if(event.event==='Finished'){ state.status='installing'; state.progress=100; }
+      emit();
+    },{restartAfterInstall:true});
+    state.status='installed'; state.progress=100; emit();
+  }catch(error){ console.error('DOM.OS update failed:',error); state.status='error'; state.error=String(error?.message||error||'Update failed.'); emit(); }
+  finally{ installing=false; }
+}
+
+window.DOMOSUpdater={
+  checkForUpdates, updateNow, getState:snapshot,
+  subscribe(listener){ listeners.add(listener); listener(snapshot()); return ()=>listeners.delete(listener); }
+};
+
+window.addEventListener('DOMContentLoaded',async()=>{
+  await loadCurrentVersion();
+  initV612();
+  const isPopout=new URLSearchParams(location.search).has('domosPopout');
+  const autoCheck=localStorage.getItem('domos612.autoCheck')!=='false';
+  if(!isPopout&&autoCheck) setTimeout(()=>checkForUpdates(true),2500);
 });
