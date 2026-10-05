@@ -23,3 +23,10 @@ Cancelled drafts, task-create undo, invalid forms, finance edit/delete and bill 
 These automated checks do not replace physical pointer/layout testing, every native pop-out, real sleep/resume timing, a live weather outage, or installer failure recovery. No destructive checks ran against the installed user's data. The user has accepted handling the remaining manual checks. Native updater installation and data preservation will be recorded after the release is available.
 
 The earlier audit and cleanup record remain in QA-AUDIT.md. Its eight-item source work queue is addressed by this release, with the testing limits above.
+
+## Native release verification
+
+GitHub run 37248056853 completed successfully and published v6.1.3 with NSIS/MSI installers, signatures and latest.json. The installed 6.1.2 app detected 6.1.3, downloaded and installed it, and restarted automatically. Windows executable version and the Updates page both show 6.1.3; the page reports up to date. The dashboard shows the undated test task and omits Open Finances.
+
+Pre/post native export comparison preserves all 22 stored keys. Only update-check/backup timestamps and the timer's expected midnight rollover changed. All lifeos4 application records and preferences match the pre-update backup. Backups are saved in Documents/DOMOS-Backups.
+
