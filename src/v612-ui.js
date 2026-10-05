@@ -2,15 +2,14 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 const PREFIX='lifeos4.', SETTINGS_KEY='domos612.settings', TIMER_KEY='domos612.workTimer', LAYOUT_MIGRATION='domos_v612_dashboard_layout';
 const DEFAULT_SETTINGS={displayName:'Dominic',defaultPage:'dashboard',rememberLastPage:true,accent:'#37e68b',sidebarDensity:'default',compact:false,animations:true,reduceMotion:false};
-const RELEASE_612=[
- 'Refreshed DOM.OS dashboard and component visuals',
- 'Functional Life Goals and Work Deadlines dashboard widgets',
- 'Upgraded Today, Schedule, Calendar and Finances widgets',
- 'Work Timer V1 with persistent daily tracking',
- 'Professional Settings and App Updates experience',
- 'Native Tauri pop-out windows instead of browser pop-ups',
- 'Cleaner sidebar and mobile-conscious responsive layout',
- 'General stability and interaction improvements'
+const RELEASE_613=[
+ 'Work Deadlines includes undated tasks; simplified finance widget',
+ 'Finance edit/delete controls and consistent payday-cycle totals',
+ 'Cancelled drafts are discarded and forms validate input',
+ 'Midnight timer tracking and accurate weather refresh status',
+ 'Cross-window synchronization and concurrent-save conflict protection',
+ 'Safer backups with validation and rollback',
+ 'Clear updater states with inline download and installation progress'
 ];
 let settings=readJSON(SETTINGS_KEY,DEFAULT_SETTINGS),timerTick=null,activeSettingsTab='general',updateUnsubscribe=null;
 
@@ -107,7 +106,7 @@ function setSelectedDate(iso){
  callGlobal(`dashSelectedDate=${JSON.stringify(iso)};dashCalView={year:${d.getFullYear()},month:${d.getMonth()}};renderDashCalendar();renderDashSchedule();`);
 }
 function shiftSelectedDate(days){const iso=appGet('dashSelectedDate',todayISO()),d=new Date(`${iso}T12:00:00`);d.setDate(d.getDate()+days);setSelectedDate([d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-'))}
-function createEventOnDate(iso){const safe=/^\d{4}-\d{2}-\d{2}$/.test(iso)?iso:todayISO();callGlobal(`(()=>{const id='e'+Date.now();snapshot('New event');events.push({id,title:'New Event',date:${JSON.stringify(safe)},time:'12:00',duration:60,type:'event'});persist();openEvent(id);renderCalendar();renderDashboard()})()`)}
+function createEventOnDate(iso){const safe=/^\d{4}-\d{2}-\d{2}$/.test(iso)?iso:todayISO();callGlobal(`newEvent(${JSON.stringify(safe)})`)}
 
 function decorateSchedule(){
  const host=cardFor('schedule')?.querySelector('#dashSchedule');if(!host)return;const iso=appGet('dashSelectedDate',todayISO()),toolbar=host.querySelector('.dash-cal-toolbar');
@@ -131,13 +130,9 @@ function decorateCalendar(){
  host.appendChild(list);
 }
 
-function financeSnapshot(){
- const accounts=appGet('financeAccounts',[]),transactions=appGet('transactions',[]),bills=appGet('financeBills',[]),savings=appGet('financeSavings',[]),budgets=appGet('financeBudgets',[]);
- const manual=accounts.reduce((s,a)=>s+(+a.balance||0),0),income=transactions.filter(t=>t.type==='income'&&!t.internalTransfer).reduce((s,t)=>s+(+t.amount||0),0),spent=transactions.filter(t=>t.type==='expense'&&!t.internalTransfer).reduce((s,t)=>s+(+t.amount||0),0),dueBills=bills.filter(b=>!b.paid).reduce((s,b)=>s+(+b.amount||0),0),reserved=savings.reduce((s,g)=>s+(+g.current||0),0),total=accounts.length?manual:income-spent,safe=Math.max(0,total-dueBills-reserved),budget=budgets.reduce((s,b)=>s+(+b.limit||0),0);
- return{accounts,transactions,budgets,income,spent,total,safe,budget};
-}
+function financeSnapshot(){return callGlobal(`({...financeTotals(),accounts:financeAccounts,transactions:payCycleTransactions(),budgets:financeBudgets,budget:financeBudgets.reduce((sum,b)=>sum+Number(b.limit||0),0)})`)}
 function daysToPayday(){const payday=Math.max(1,Math.min(31,Number(appGet('paydayDay',28))||28)),now=new Date(),make=(y,m)=>new Date(y,m,Math.min(payday,new Date(y,m+1,0).getDate()),12);let date=make(now.getFullYear(),now.getMonth());if(date<new Date(now.getFullYear(),now.getMonth(),now.getDate(),12))date=make(now.getFullYear(),now.getMonth()+1);return Math.max(0,Math.round((date-new Date(now.getFullYear(),now.getMonth(),now.getDate(),12))/86400000))}
-function financeCategories(transactions){const month=todayISO().slice(0,7),b={Essentials:0,Food:0,Transport:0,Other:0};transactions.filter(t=>t.type==='expense'&&!t.internalTransfer&&(!t.date||t.date.startsWith(month))).forEach(t=>{const c=String(t.category||'').toLowerCase(),v=+t.amount||0;if(/food|grocer|restaurant|meal|eating/.test(c))b.Food+=v;else if(/fuel|transport|car|taxi|train|bus/.test(c))b.Transport+=v;else if(/bill|rent|utility|essential|health|subscription/.test(c))b.Essentials+=v;else b.Other+=v});return b}
+function financeCategories(transactions){const b={Essentials:0,Food:0,Transport:0,Other:0};transactions.filter(t=>t.type==='expense'&&!t.internalTransfer).forEach(t=>{const c=String(t.category||'').toLowerCase(),v=+t.amount||0;if(/food|grocer|restaurant|meal|eating/.test(c))b.Food+=v;else if(/fuel|transport|car|taxi|train|bus/.test(c))b.Transport+=v;else if(/bill|rent|utility|essential|health|subscription/.test(c))b.Essentials+=v;else b.Other+=v});return b}
 function renderFinanceWidget(){
  const host=document.getElementById('dom612Finance');if(!host)return;const d=financeSnapshot(),days=daysToPayday(),cats=financeCategories(d.transactions),pct=d.budget?Math.min(100,Math.round(d.spent/d.budget*100)):0;
  host.innerHTML=`<div class="dom612-finance"><div class="dom612-finance-main"><div><strong>${money(d.safe)}</strong><span>Available to spend</span></div><div class="dom612-payday"><b>${days} days</b><span>until payday</span></div></div><div class="dom612-progress"><i style="width:${pct}%"></i></div><div class="dom612-finance-line"><span>${money(d.spent)} spent</span><span>${d.budget?money(d.budget)+' budget':'No budget set'}</span></div><div class="dom612-category-grid">${Object.entries(cats).map(([name,value],i)=>`<button type="button" data-open-finance><span class="cat-icon c${i}">${['▣','◫','◆','•••'][i]}</span><b>${money(value)}</b><small>${name}</small></button>`).join('')}</div></div>`;
@@ -158,7 +153,13 @@ function renderDeadlinesWidget(){
 }
 
 const timerDefault=()=>({day:todayISO(),elapsedMs:0,sessionMs:0,sessionCount:0,running:false,startedAt:null,targetHours:8});
-function readTimer(){let t=readJSON(TIMER_KEY,timerDefault());if(t.day!==todayISO())t=timerDefault();return{...timerDefault(),...t}}
+function readTimer(){
+ let t={...timerDefault(),...readJSON(TIMER_KEY,timerDefault())};
+ if(t.day!==todayISO()){
+  const running=t.running&&Number.isFinite(t.startedAt),now=new Date(),midnight=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();
+  t={...timerDefault(),running:!!running,startedAt:running?Math.max(midnight,t.startedAt):null};writeJSON(TIMER_KEY,t);
+ }return t;
+}
 const writeTimer=t=>writeJSON(TIMER_KEY,t);
 function timerTotals(t){const live=t.running&&t.startedAt?Math.max(0,Date.now()-t.startedAt):0;return{total:t.elapsedMs+live,session:t.sessionMs+live}}
 function formatDuration(ms){const total=Math.floor(ms/1000),h=Math.floor(total/3600),m=Math.floor((total%3600)/60),s=total%60;return[h,m,s].map(n=>String(n).padStart(2,'0')).join(':')}
@@ -200,21 +201,250 @@ function renderShortcutsSettings(panel){panel.innerHTML=`<div class="dom612-sett
 
 function backupPayload(){const data={};for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k?.startsWith(PREFIX)||k?.startsWith('domos_')||k?.startsWith('domos612.'))data[k]=localStorage.getItem(k)}return{format:'DOM.OS Backup',version:1,createdAt:new Date().toISOString(),data}}
 function downloadBackup(){const blob=new Blob([JSON.stringify(backupPayload(),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`DOM.OS-backup-${todayISO()}.json`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);localStorage.setItem('domos612.lastBackup',new Date().toISOString());toast('DOM.OS backup exported');renderSettings('data')}
-function importBackup(file){const r=new FileReader();r.onload=()=>{try{const p=JSON.parse(String(r.result||''));if(p?.format!=='DOM.OS Backup'||p.version!==1||!p.data||typeof p.data!=='object'||Array.isArray(p.data))throw new Error('Not a supported DOM.OS backup');for(const [k,v] of Object.entries(p.data)){if(!(k.startsWith(PREFIX)||k.startsWith('domos_')||k.startsWith('domos612.'))||typeof v!=='string')throw new Error('Invalid backup data');if(k.startsWith(PREFIX)){const parsed=JSON.parse(v);if(['tasks','events','routines','routineExceptions','goals','notes','transactions','financeAccounts','financeBudgets','financeBills','financeSavings'].includes(k.slice(PREFIX.length))&&!Array.isArray(parsed))throw new Error('Invalid collection: '+k)}}if(!confirm('Import this backup? Current local DOM.OS data will be replaced where keys overlap.'))return;Object.entries(p.data).forEach(([k,v])=>localStorage.setItem(k,String(v)));toast('Backup imported. Restarting DOM.OS…');setTimeout(()=>location.reload(),500)}catch(e){alert(`Could not import backup: ${e.message}`)}};r.readAsText(file)}
+function validateBackup(p){
+ if(p?.format!=='DOM.OS Backup'||p.version!==1||!p.data||typeof p.data!=='object'||Array.isArray(p.data))throw new Error('Not a supported DOM.OS backup');
+ const collections=['tasks','events','calendarTemplates','routines','routineExceptions','goals','notes','transactions','financeAccounts','financeBudgets','financeBills','financeSavings'];
+ const inspect=value=>{if(!value||typeof value!=='object')return;for(const [key,v] of Object.entries(value)){if(['__proto__','constructor','prototype'].includes(key))throw new Error('Unsafe backup field');if(typeof v==='number'&&!Number.isFinite(v))throw new Error('Invalid number');inspect(v)}};
+ for(const [k,v] of Object.entries(p.data)){
+  if(!(k.startsWith(PREFIX)||k.startsWith('domos_')||k.startsWith('domos612.'))||typeof v!=='string')throw new Error('Invalid backup data');
+  if(k.startsWith(PREFIX)||k===SETTINGS_KEY||k===TIMER_KEY){
+   const parsed=JSON.parse(v);inspect(parsed);
+   if(collections.includes(k.slice(PREFIX.length))){
+    if(!Array.isArray(parsed))throw new Error('Invalid collection: '+k);
+    const ids=new Set();for(const item of parsed){const exception=k===PREFIX+'routineExceptions',id=exception?item?.routineId:item?.id;if(!item||typeof item!=='object'||Array.isArray(item)||typeof id!=='string'||!/^[a-zA-Z0-9_.:-]+$/.test(id)||(!exception&&ids.has(id)))throw new Error('Invalid or duplicate record ID: '+k);ids.add(id);
+     for(const field of ['title','name','desc','description','body','date','time','category'])if(item[field]!==undefined&&typeof item[field]!=='string')throw new Error('Invalid '+field+': '+k);
+     for(const field of ['amount','balance','limit','current','target','duration','progress'])if(item[field]!==undefined&&(!Number.isFinite(Number(item[field]))||(['amount','limit','current','target','duration','progress'].includes(field)&&Number(item[field])<0)))throw new Error('Invalid '+field+': '+k);
+    }
+   }
+  }
+ }
+ return p.data;
+}
+function restoreBackup(data){
+ const prior=new Map(),written=[];
+ try{for(const [k,v] of Object.entries(data)){prior.set(k,localStorage.getItem(k));localStorage.setItem(k,v);written.push(k)}}
+ catch(error){for(const k of written){const old=prior.get(k);if(old===null)localStorage.removeItem(k);else localStorage.setItem(k,old)}throw error}
+}
+function importBackup(file){const r=new FileReader();r.onload=()=>{try{const data=validateBackup(JSON.parse(String(r.result||'')));if(!confirm('Import this backup? Current local DOM.OS data will be replaced where keys overlap.'))return;restoreBackup(data);toast('Backup imported. Restarting DOM.OS…');setTimeout(()=>location.reload(),500)}catch(e){alert(`Could not import backup: ${e.message}`)}};r.readAsText(file)}
+
 function renderDataSettings(panel){
  const last=localStorage.getItem('domos612.lastBackup');panel.innerHTML=`<div class="dom612-settings-grid"><section class="dom612-settings-card span2"><header><span class="setting-icon">◫</span><div><h3>Data & Backup</h3><p>Keep your local DOM.OS data safe and portable.</p></div></header><div class="dom612-info-row"><span><b>Automatic local saving</b><small>DOM.OS saves changes to this device as you work.</small></span><strong>On</strong></div><div class="dom612-info-row"><span><b>Last exported backup</b><small>${last?new Date(last).toLocaleString('en-GB'):'No backup exported yet'}</small></span><button data-backup-now>Back up now</button></div><div class="dom612-actions"><button data-export>Export data</button><label class="dom612-import">Import data<input type="file" accept="application/json,.json" data-import></label></div></section></div>`;panel.querySelector('[data-backup-now]').onclick=downloadBackup;panel.querySelector('[data-export]').onclick=downloadBackup;panel.querySelector('[data-import]').onchange=e=>e.target.files?.[0]&&importBackup(e.target.files[0]);
 }
-function renderWeatherSettings(panel){panel.innerHTML=`<div class="dom612-settings-grid"><section class="dom612-settings-card span2"><header><span class="setting-icon">☁</span><div><h3>Weather</h3><p>Current desktop weather source and status.</p></div></header><div class="dom612-info-row"><span><b>Location</b><small>The current desktop build uses Bradford for the animated greeting weather.</small></span><strong>Bradford, UK</strong></div><div class="dom612-info-row"><span><b>Provider</b><small>Weather data is fetched from Open-Meteo.</small></span><strong>Open-Meteo</strong></div><div class="dom612-actions"><button data-refresh-weather>Refresh weather now</button></div></section></div>`;panel.querySelector('[data-refresh-weather]').onclick=()=>{try{callGlobal('loadBradfordWeather()');toast('Weather refreshed')}catch{}}}
+function renderWeatherSettings(panel){panel.innerHTML=`<div class="dom612-settings-grid"><section class="dom612-settings-card span2"><header><span class="setting-icon">☁</span><div><h3>Weather</h3><p>Current desktop weather source and status.</p></div></header><div class="dom612-info-row"><span><b>Location</b><small>The current desktop build uses Bradford for the animated greeting weather.</small></span><strong>Bradford, UK</strong></div><div class="dom612-info-row"><span><b>Provider</b><small>Weather data is fetched from Open-Meteo.</small></span><strong>Open-Meteo</strong></div><div class="dom612-actions"><button data-refresh-weather>Refresh weather now</button></div></section></div>`;panel.querySelector('[data-refresh-weather]').onclick=async()=>{const button=panel.querySelector('[data-refresh-weather]');button.disabled=true;button.textContent='Refreshing…';try{const ok=await callGlobal('loadBradfordWeather()');toast(ok?'Weather refreshed':'Weather unavailable. Please try again.')}catch{toast('Weather unavailable. Please try again.')}finally{button.disabled=false;button.textContent='Refresh weather now'}}}
 
-const updateState=()=>window.DOMOSUpdater?.getState?.()||{currentVersion:'6.1.2',status:'idle',available:false,progress:0,downloaded:0,total:0};
+const updateState=()=>window.DOMOSUpdater?.getState?.()||{currentVersion:'6.1.3',status:'idle',available:false,progress:0,downloaded:0,total:0};
 const formatBytes=b=>b?`${(b/1024/1024).toFixed(1)} MB`:'0 MB';
 function notesList(text){if(!text||text.trim().toLowerCase()==='dom.os update')return[];return text.split(/\r?\n/).map(x=>x.replace(/^[-*•]\s*/,'').trim()).filter(Boolean).slice(0,8)}
 function renderUpdatesSettings(panel){
- const s=updateState(),notes=s.available?notesList(s.releaseNotes):RELEASE_612,last=s.lastChecked?new Date(s.lastChecked).toLocaleString('en-GB'):'Not checked yet',status=s.status==='checking'?'Checking…':s.status==='downloading'?`Downloading ${s.progress||0}%`:s.status==='installing'?'Installing…':s.status==='error'?'Update check failed':s.available?`Update available — v${s.latestVersion}`:'You’re up to date';
- panel.innerHTML=`<div class="dom612-updates-grid"><section class="dom612-settings-card current-version"><header><span class="setting-icon">◇</span><div><h3>Current Version</h3><p>Your current DOM.OS installation.</p></div></header><div class="dom612-version"><span class="stack-icon">◈</span><div><strong>DOM.OS v${escapeHtml(s.currentVersion||'…')}</strong><small>Stable desktop release</small></div><em>Stable</em></div><div class="dom612-info-row"><span><b>Update channel</b><small>Signed stable GitHub releases.</small></span><strong>Stable</strong></div><div class="dom612-info-row"><span><b>Last checked</b><small>${escapeHtml(last)}</small></span><span></span></div>${settingToggle('Automatically check for updates','Check shortly after DOM.OS starts.',localStorage.getItem('domos612.autoCheck')!=='false','autoCheck')}</section><section class="dom612-settings-card update-available"><header><span class="download-icon">↓</span><div><h2>${s.available?`Update available — v${escapeHtml(s.latestVersion)}`:status}</h2><p>${s.available?'A new signed version of DOM.OS is ready to download and install.':'DOM.OS checks the signed release feed for newer versions.'}</p></div></header>${s.available?`<ul>${(notes.length?notes:['New DOM.OS improvements and fixes']).map(n=>`<li>${escapeHtml(n)}</li>`).join('')}</ul>`:`<div class="dom612-update-ok"><b>DOM.OS v${escapeHtml(s.currentVersion||'…')}</b><span>${escapeHtml(status)}</span></div>`}${s.error?`<div class="dom612-update-error">${escapeHtml(s.error)}</div>`:''}<div class="dom612-actions"><button class="primary" data-update-install ${s.available&&!s.installing?'':'disabled'}>${s.status==='downloading'||s.status==='installing'?'Updating…':'Download & install'}</button><button data-update-check ${s.checking||s.installing?'disabled':''}>↻ Check for updates</button></div></section><section class="dom612-settings-card download-progress"><header><span class="setting-icon">↓</span><div><h3>Download Progress</h3><p>Live status when DOM.OS is updating.</p></div><strong>${s.progress||0}%</strong></header><div class="dom612-progress"><i style="width:${s.progress||0}%"></i></div><div class="dom612-finance-line"><span>${s.status==='downloading'?`Downloading v${escapeHtml(s.latestVersion)}…`:status}</span><span>${s.total?`${formatBytes(s.downloaded)} of ${formatBytes(s.total)}`:''}</span></div></section><section class="dom612-settings-card release-notes"><header><span class="setting-icon">▤</span><div><h3>Release Notes</h3><p>What changed in the current or available release.</p></div></header><div class="dom612-release"><div><b>v${escapeHtml(s.available?s.latestVersion:(s.currentVersion||'6.1.2'))}</b><em>${s.available?'Available':'Current'}</em></div><ul>${notes.map(n=>`<li>${escapeHtml(n)}</li>`).join('')}</ul></div></section></div>`;
- panel.querySelector('[data-update-check]').onclick=()=>window.DOMOSUpdater?.checkForUpdates(false);panel.querySelector('[data-update-install]').onclick=()=>window.DOMOSUpdater?.updateNow();const auto=panel.querySelector('[data-setting-toggle="autoCheck"]');if(auto)auto.onchange=()=>localStorage.setItem('domos612.autoCheck',String(auto.checked));
+  const s=updateState();
+  const notes=s.available?notesList(s.releaseNotes):RELEASE_613;
+  const last=s.lastChecked
+    ? new Date(s.lastChecked).toLocaleString('en-GB')
+    : 'Not checked yet';
+
+  const checking=s.status==='checking'||s.checking;
+  const downloading=s.status==='downloading';
+  const installing=s.status==='installing';
+  const restarting=s.status==='installed'||s.status==='restarting';
+  const busy=checking||downloading||installing||restarting;
+
+  let heading="You're up to date";
+  let description='DOM.OS checks the signed release feed for newer versions.';
+  let stateLabel="You're up to date";
+
+  if(checking){
+    heading='Checking for updates...';
+    description='Checking the signed DOM.OS release feed.';
+    stateLabel='Checking...';
+  }else if(downloading){
+    heading=`Downloading DOM.OS v${escapeHtml(s.latestVersion||'')}`;
+    description='The update is downloading. You can keep using DOM.OS.';
+    stateLabel=`${s.progress||0}%`;
+  }else if(installing){
+    heading='Installing update...';
+    description='DOM.OS is installing the downloaded update.';
+    stateLabel='Installing...';
+  }else if(restarting){
+    heading='Update installed';
+    description='DOM.OS is restarting to finish the update.';
+    stateLabel='Restarting...';
+  }else if(s.status==='error'){
+    heading='Update failed';
+    description='DOM.OS could not complete the update. Try again below.';
+    stateLabel='Update failed';
+  }else if(s.available){
+    heading=`Update available - v${escapeHtml(s.latestVersion||'')}`;
+    description='A new signed version of DOM.OS is ready to download and install.';
+    stateLabel='Update available';
+  }
+
+  const progressHtml=downloading?`
+    <div class="dom612-inline-update-progress" style="margin-top:18px">
+      <div class="dom612-finance-line">
+        <span>Downloading update</span>
+        <strong>${s.progress||0}%</strong>
+      </div>
+
+      <div class="dom612-progress">
+        <i style="width:${Math.max(0,Math.min(100,s.progress||0))}%"></i>
+      </div>
+
+      <div class="dom612-finance-line">
+        <span>
+          ${formatBytes(s.downloaded||0)}
+          ${s.total?` of ${formatBytes(s.total)}`:''}
+        </span>
+        <span>Please keep DOM.OS open</span>
+      </div>
+    </div>`
+    :installing?`
+    <div class="dom612-inline-update-progress" style="margin-top:18px">
+      <div class="dom612-finance-line">
+        <span>Installing DOM.OS update</span>
+        <strong>Installing...</strong>
+      </div>
+      <div class="dom612-progress">
+        <i style="width:100%"></i>
+      </div>
+    </div>`
+    :'';
+
+  const installButton=s.available&&!busy?`
+    <button class="primary" data-update-install>
+      Download & install
+    </button>`
+    :'';
+
+  const checkButton=!restarting?`
+    <button data-update-check ${busy?'disabled':''}>
+      ${checking?'Checking...':'Check for updates'}
+    </button>`
+    :'';
+
+  panel.innerHTML=`
+    <div class="dom612-updates-grid">
+
+      <section class="dom612-settings-card current-version">
+        <header>
+          <span class="setting-icon">◇</span>
+          <div>
+            <h3>Current Version</h3>
+            <p>Your current DOM.OS installation.</p>
+          </div>
+        </header>
+
+        <div class="dom612-version">
+          <span class="stack-icon">◇</span>
+          <div>
+            <strong>DOM.OS v${escapeHtml(s.currentVersion||'6.1.3')}</strong>
+            <small>Stable desktop release</small>
+          </div>
+          <em>Stable</em>
+        </div>
+
+        <div class="dom612-info-row">
+          <span>
+            <b>Update channel</b>
+            <small>Signed stable GitHub releases.</small>
+          </span>
+          <strong>Stable</strong>
+        </div>
+
+        <div class="dom612-info-row">
+          <span>
+            <b>Last checked</b>
+            <small>${escapeHtml(last)}</small>
+          </span>
+          <span></span>
+        </div>
+
+        ${settingToggle(
+          'Automatically check for updates',
+          'Check shortly after DOM.OS starts.',
+          localStorage.getItem('domos612.autoCheck')!=='false',
+          'autoCheck'
+        )}
+      </section>
+
+      <section class="dom612-settings-card update-available">
+        <header>
+          <span class="download-icon">↓</span>
+          <div>
+            <h2>${heading}</h2>
+            <p>${description}</p>
+          </div>
+        </header>
+
+        <div class="dom612-update-ok">
+          <b>DOM.OS v${escapeHtml(
+            s.available
+              ? (s.latestVersion||s.currentVersion||'6.1.3')
+              : (s.currentVersion||'6.1.3')
+          )}</b>
+          <span>${stateLabel}</span>
+        </div>
+
+        ${s.error?`
+          <div class="dom612-update-error">
+            ${escapeHtml(s.error)}
+          </div>`
+          :''}
+
+        ${progressHtml}
+
+        <div class="dom612-actions">
+          ${installButton}
+          ${checkButton}
+        </div>
+      </section>
+
+      <section class="dom612-settings-card release-notes span2">
+        <header>
+          <span class="setting-icon">▤</span>
+          <div>
+            <h3>Release Notes</h3>
+            <p>What changed in the current or available release.</p>
+          </div>
+        </header>
+
+        <div class="dom612-release">
+          <div>
+            <b>v${escapeHtml(
+              s.available
+                ? (s.latestVersion||'')
+                : (s.currentVersion||'6.1.3')
+            )}</b>
+            <em>${s.available?'Available':'Current'}</em>
+          </div>
+
+          <ul>
+            ${(notes.length?notes:['New DOM.OS improvements and fixes.'])
+              .map(n=>`<li>${escapeHtml(n)}</li>`)
+              .join('')}
+          </ul>
+        </div>
+      </section>
+
+    </div>`;
+
+  const check=panel.querySelector('[data-update-check]');
+  if(check){
+    check.onclick=()=>window.DOMOSUpdater?.checkForUpdates(false);
+  }
+
+  const install=panel.querySelector('[data-update-install]');
+  if(install){
+    install.onclick=()=>window.DOMOSUpdater?.updateNow();
+  }
+
+  const auto=panel.querySelector('[data-setting-toggle="autoCheck"]');
+  if(auto){
+    auto.onchange=()=>{
+      localStorage.setItem('domos612.autoCheck',String(auto.checked));
+    };
+  }
 }
-function renderAboutSettings(panel){const s=updateState();panel.innerHTML=`<div class="dom612-settings-grid"><section class="dom612-settings-card span2"><header><span class="setting-icon">ⓘ</span><div><h3>About DOM.OS</h3><p>Your personal operating system for the life you are building.</p></div></header><div class="dom612-about"><div class="dom612-about-logo">D</div><div><h2>DOM.OS</h2><b>v${escapeHtml(s.currentVersion||'6.1.2')}</b><p>Desktop · Personal edition</p></div></div><div class="dom612-info-row"><span><b>Storage</b><small>Local device persistence</small></span><strong>Local</strong></div><div class="dom612-info-row"><span><b>Updates</b><small>Signed Tauri updater releases</small></span><strong>Enabled</strong></div><div class="dom612-info-row"><span><b>Mobile direction</b><small>The 6.1.2 component system is responsive and designed to scale toward a future mobile build.</small></span><strong>Planned</strong></div></section></div>`}
+function renderAboutSettings(panel){const s=updateState();panel.innerHTML=`<div class="dom612-settings-grid"><section class="dom612-settings-card span2"><header><span class="setting-icon">ⓘ</span><div><h3>About DOM.OS</h3><p>Your personal operating system for the life you are building.</p></div></header><div class="dom612-about"><div class="dom612-about-logo">D</div><div><h2>DOM.OS</h2><b>v${escapeHtml(s.currentVersion||'6.1.3')}</b><p>Desktop · Personal edition</p></div></div><div class="dom612-info-row"><span><b>Storage</b><small>Local device persistence</small></span><strong>Local</strong></div><div class="dom612-info-row"><span><b>Updates</b><small>Signed Tauri updater releases</small></span><strong>Enabled</strong></div><div class="dom612-info-row"><span><b>Mobile direction</b><small>The 6.1.2 component system is responsive and designed to scale toward a future mobile build.</small></span><strong>Planned</strong></div></section></div>`}
 
 function renderSettings(tab=activeSettingsTab){
  buildSettingsShell();activeSettingsTab=tab;const page=document.getElementById('page-settings');if(!page)return;page.querySelectorAll('[data-settings-tab]').forEach(b=>b.classList.toggle('active',b.dataset.settingsTab===tab));const title=page.querySelector('#dom612SettingsTitle'),sub=page.querySelector('#dom612SettingsSubtitle');if(title)title.textContent=tab==='updates'?'Updates':'Settings';if(sub)sub.textContent=tab==='updates'?'Keep DOM.OS current without reinstalling.':'Customize DOM.OS to fit how you work.';const panel=page.querySelector('#dom612SettingsPanel');if(!panel)return;
@@ -241,22 +471,30 @@ function enterPopoutMode(id){
 }
 function initUpdaterSubscription(){updateUnsubscribe?.();updateUnsubscribe=window.DOMOSUpdater?.subscribe?.(()=>{if(activeSettingsTab==='updates'&&document.getElementById('page-settings')?.classList.contains('active'))renderSettings('updates')})}
 function syncOtherWindows(){
- let refresh=null;
- window.addEventListener('storage',event=>{
-  if(event.key===SETTINGS_KEY){settings=readJSON(SETTINGS_KEY,DEFAULT_SETTINGS);applySettings();return}
-  if(event.key===TIMER_KEY){renderWorkTimer();return}
-  if(!event.key?.startsWith(PREFIX))return;
-  if(event.key===PREFIX+'quickNote'){
-   const note=document.getElementById('quickNote');if(note&&document.activeElement!==note)note.value=appGet('quickNote','');return;
-  }
-  clearTimeout(refresh);
-  refresh=setTimeout(()=>callGlobal(`
+ let refresh=null,deferred=false;
+ const refreshData=()=>{
+  if(document.querySelector('.drawer.show,.routine-modal.show,.v52-modal.show,.rename-modal.show')||document.activeElement?.matches('input,textarea,[contenteditable="true"]')){deferred=true;return}
+  deferred=false;
+  callGlobal(`
    tasks=store.get('tasks',[]);events=store.get('events',[]);goals=store.get('goals',[]);
    routines=store.get('routines',[]);routineExceptions=store.get('routineExceptions',[]);routineChecks=store.get('routineChecks',{});
    transactions=store.get('transactions',[]);financeAccounts=store.get('financeAccounts',[]);
    financeBudgets=store.get('financeBudgets',[]);financeBills=store.get('financeBills',[]);financeSavings=store.get('financeSavings',[]);
+   notes=store.get('notes',[]);activeNoteId=store.get('activeNoteId',null);calendarTemplates=store.get('calendarTemplates',[]);
+   dash=store.get('dashboard',dash);paydayDay=store.get('paydayDay',28);dashSelectedDate=store.get('dashSelectedDate',localTodayISO());dashCalView=store.get('dashCalView',dashCalView);
+   quickNoteState=store.get('quickNoteState',quickNoteState);applyQuickNoteState();document.getElementById('quickNote').value=store.get('quickNote','');keys=store.get('keys',{...defaults});
    renderAll();
-  `),100);
+  `);
+ };
+ const schedule=()=>{clearTimeout(refresh);refresh=setTimeout(refreshData,100)};
+ document.addEventListener('focusout',()=>{if(deferred)schedule()});
+ window.addEventListener('domos-editor-closed',()=>{if(deferred)schedule()});
+ window.addEventListener('storage',event=>{
+  if(event.key===SETTINGS_KEY){settings=readJSON(SETTINGS_KEY,DEFAULT_SETTINGS);applySettings();return}
+  if(event.key===TIMER_KEY){renderWorkTimer();return}
+  if(!event.key?.startsWith(PREFIX))return;
+  if(event.key===PREFIX+'quickNote'){const note=document.getElementById('quickNote');if(note&&document.activeElement!==note)note.value=appGet('quickNote','');else deferred=true;return}
+  schedule();
  });
 }
 function applyStartPage(){const last=localStorage.getItem('domos612.lastPage'),page=settings.rememberLastPage&&last?last:settings.defaultPage;if(page&&page!=='dashboard')setTimeout(()=>showPage(page),30)}

@@ -280,7 +280,34 @@ if(!localStorage.getItem('domos_v51_clean')){
  localStorage.setItem('domos_v51_clean','1');
 }
 
-const store={get:(k,d)=>{try{return JSON.parse(localStorage.getItem('lifeos4.'+k))??d}catch{return d}},set:(k,v)=>localStorage.setItem('lifeos4.'+k,JSON.stringify(v))};
+
+const storageBaseline=new Map();
+const sameValue=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+function mergeStored(base,local,remote){
+ if(sameValue(local,base))return remote;
+ if(sameValue(remote,base)||sameValue(local,remote))return local;
+ if(Array.isArray(base)&&Array.isArray(local)&&Array.isArray(remote)&&[...base,...local,...remote].every(x=>x&&typeof x.id==='string')){
+  const byId=a=>new Map(a.map(x=>[x.id,x])),b=byId(base),l=byId(local),r=byId(remote);
+  return [...new Set([...local.map(x=>x.id),...remote.map(x=>x.id)])].map(id=>mergeStored(b.get(id),l.get(id),r.get(id))).filter(x=>x!==undefined);
+ }
+ if([base,local,remote].every(x=>x&&typeof x==='object'&&!Array.isArray(x))){
+  const result={};for(const k of new Set([...Object.keys(base),...Object.keys(local),...Object.keys(remote)])){const v=mergeStored(base[k],local[k],remote[k]);if(v!==undefined)result[k]=v}return result;
+ }
+ throw new Error('This item changed in another window. Close and reopen the editor before saving again.');
+}
+function prepareStore(k,v){
+ const raw=localStorage.getItem('lifeos4.'+k),remote=raw===null?undefined:JSON.parse(raw);
+ const base=storageBaseline.has(k)?storageBaseline.get(k):remote;
+ try{return {k,v,merged:structuredClone(mergeStored(base,v,raw===null?base:remote)),raw}}catch(e){window.dispatchEvent(new StorageEvent('storage',{key:'lifeos4.'+k}));alert(e.message);throw e}
+}
+function commitStore(entries){
+ const written=[];
+ try{for(const x of entries){const encoded=JSON.stringify(x.merged);if(encoded!==x.raw){localStorage.setItem('lifeos4.'+x.k,encoded);written.push(x)}}}
+ catch(e){for(const x of written){if(x.raw===null)localStorage.removeItem('lifeos4.'+x.k);else localStorage.setItem('lifeos4.'+x.k,x.raw)}alert('Could not save data. Your previous data was retained.');throw e}
+ for(const x of entries){storageBaseline.set(x.k,structuredClone(x.merged));if(Array.isArray(x.v)&&Array.isArray(x.merged))x.v.splice(0,x.v.length,...x.merged);else if(x.v&&x.merged&&typeof x.v==='object'&&!Array.isArray(x.v)){Object.keys(x.v).forEach(k=>delete x.v[k]);Object.assign(x.v,x.merged)}}
+}
+const store={get:(k,d)=>{let v;try{v=JSON.parse(localStorage.getItem('lifeos4.'+k))??d}catch{v=d}storageBaseline.set(k,structuredClone(v));return v},set:(k,v)=>commitStore([prepareStore(k,v)])};
+
 let tasks=store.get('tasks',[]);
 if(!localStorage.getItem('domos_v551_test_work_task')){
  if(!tasks.some(t=>t.id==='test-work-task-v551')){
@@ -359,7 +386,7 @@ const widgets=[
 {id:'schedule',title:'Schedule',cls:'',body:()=>`<div id="dashSchedule"></div>`},
 {id:'month',title:'Calendar',cls:'',body:()=>`<div id="dashCalendar"></div>`},
 {id:'finance',title:'Finances',cls:'',body:()=>`<div class="pad"><div class="muted">Current balance</div><div style="font-size:24px;font-weight:750;margin:5px 0">${money(transactions.filter(x=>x.type==='income').reduce((s,x)=>s+Number(x.amount||0),0)-transactions.filter(x=>x.type==='expense').reduce((s,x)=>s+Number(x.amount||0),0))}</div><div class="muted">${transactions.length} transaction${transactions.length===1?'':'s'} recorded</div></div>`},
-{id:'goals',title:'Goals',cls:'',body:()=>`<div class="pad">${goals.length?goals.slice(0,3).map(g=>`<div style="margin:7px 0"><div style="display:flex;justify-content:space-between"><span>${g.name}</span><span class="muted">${g.progress||0}%</span></div><div class="goal-progress"><i style="width:${g.progress||0}%"></i></div></div>`).join(''):'<span class="muted">No goals yet.</span>'}</div>`},
+{id:'goals',title:'Goals',cls:'',body:()=>`<div class="pad">${goals.length?goals.slice(0,3).map(g=>`<div style="margin:7px 0"><div style="display:flex;justify-content:space-between"><span>${esc(g.name)}</span><span class="muted">${g.progress||0}%</span></div><div class="goal-progress"><i style="width:${g.progress||0}%"></i></div></div>`).join(''):'<span class="muted">No goals yet.</span>'}</div>`},
 {id:'quick',title:'Quick Actions',cls:'w3 h2',body:()=>`<div class="pad"><button class="btn" onclick="newTask()">＋ Task</button> <button class="btn ghost" onclick="newEvent()">＋ Event</button></div>`},
 {id:'upcoming',title:'Upcoming',cls:'w3 h2',body:()=>`<div class="pad" id="upcomingReal"></div>`}
 ];
@@ -370,10 +397,18 @@ if(!dash.names) dash.names={};
 dash.order=dash.order.filter(id=>id!=='routine'&&id!=='notes');
 dash.hidden=dash.hidden.filter(id=>id!=='routine'&&id!=='notes');
 
-let undo=[],redo=[];
-function snapshot(label){undo.push({label,tasks:structuredClone(tasks),events:structuredClone(events),dash:structuredClone(dash),routines:structuredClone(routines)});if(undo.length>30)undo.shift();redo=[]}
-function persist(){store.set('tasks',tasks);store.set('events',events);store.set('dashboard',dash);store.set('routines',routines);store.set('calendarTemplates',calendarTemplates);store.set('financeAccounts',financeAccounts);store.set('financeBudgets',financeBudgets);store.set('financeBills',financeBills);store.set('financeSavings',financeSavings)}
-function toastMsg(msg,canUndo=true){toast.innerHTML=msg+(canUndo?` <button onclick="doUndo()">UNDO</button>`:'');toast.classList.add('show');clearTimeout(window.tt);window.tt=setTimeout(()=>toast.classList.remove('show'),2800)}
+let undo=[],redo=[],pendingDraft=null;
+function snapshot(label){undo.push({label,tasks:structuredClone(tasks.filter(x=>x.id!==pendingDraft?.id)),events:structuredClone(events.filter(x=>x.id!==pendingDraft?.id)),dash:structuredClone(dash),routines:structuredClone(routines)});if(undo.length>30)undo.shift();redo=[]}
+function persist(){
+ const entries={tasks:tasks.filter(x=>x.id!==pendingDraft?.id),events:events.filter(x=>x.id!==pendingDraft?.id),dashboard:dash,routines,calendarTemplates:calendarTemplates.filter(x=>x.id!==pendingDraft?.id),financeAccounts,financeBudgets,financeBills,financeSavings};
+ commitStore(Object.entries(entries).map(([k,v])=>prepareStore(k,v)));
+ // Adopt merged collections while preserving the unsaved editor draft.
+ tasks=entries.tasks.concat(pendingDraft?.kind==='tasks'?[pendingDraft.value]:[]);
+ events=entries.events.concat(pendingDraft?.kind==='events'?[pendingDraft.value]:[]);
+ calendarTemplates=entries.calendarTemplates.concat(pendingDraft?.kind==='calendarTemplates'?[pendingDraft.value]:[]);
+}
+
+function toastMsg(msg,canUndo=false){toast.innerHTML=esc(msg)+(canUndo?` <button onclick="doUndo()">UNDO</button>`:'');toast.classList.add('show');clearTimeout(window.tt);window.tt=setTimeout(()=>toast.classList.remove('show'),2800)}
 function doUndo(){if(!undo.length)return;redo.push({tasks:structuredClone(tasks),events:structuredClone(events),dash:structuredClone(dash),routines:structuredClone(routines)});let s=undo.pop();tasks=s.tasks;events=s.events;dash=s.dash;if(s.routines)routines=s.routines;persist();renderAll();toastMsg('Undone',false)}
 function doRedo(){if(!redo.length)return;undo.push({tasks:structuredClone(tasks),events:structuredClone(events),dash:structuredClone(dash),routines:structuredClone(routines)});let s=redo.pop();tasks=s.tasks;events=s.events;dash=s.dash;if(s.routines)routines=s.routines;persist();renderAll();toastMsg('Redone',false)}
 function showPage(n){$$('.page').forEach(x=>x.classList.toggle('active',x.id==='page-'+n));$$('.nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===n));$('.main').scrollTop=0;if(n==='calendar')renderCalendar();if(n==='tasks')renderTasks();if(n==='routine')renderRoutines();if(n==='finances')renderFinance();if(n==='goals')renderGoals();if(n==='notes')renderNotes()}
@@ -408,7 +443,7 @@ function renderDashboard(){
   el.className='card widget';el.style.setProperty('--cols',dim.cols);el.style.setProperty('--rows',dim.rows);
   el.draggable=edit;el.dataset.id=id;
   el.innerHTML=`<span class="drag-handle">⠿</span><button class="closew">✕</button><span class="resize" title="Drag to resize"></span>
-   <div class="head"><h3>${dash.names[id]||w.title}</h3><button class="morebtn" aria-label="Widget options">•••</button></div>
+   <div class="head"><h3>${esc(dash.names[id]||w.title)}</h3><button class="morebtn" aria-label="Widget options">•••</button></div>
    <div class="widget-menu">
     <button data-act="pop">↗ &nbsp; Pop out window</button>
     <button data-act="rename">✎ &nbsp; Rename widget</button>
@@ -436,14 +471,14 @@ function renderDashboard(){
  });
  renderDashTasks();renderDashWorkTasks();renderDashCalendar();renderDashSchedule();updateSummary();updateLiveClock();renderUpcomingReal()
 }
-function hideWidget(id){snapshot('Hide widget');if(!dash.hidden.includes(id))dash.hidden.push(id);persist();renderDashboard();toastMsg('Widget hidden')}
+function hideWidget(id){snapshot('Hide widget');if(!dash.hidden.includes(id))dash.hidden.push(id);persist();renderDashboard();toastMsg('Widget hidden',true)}
 function popWidget(id){
  let w=widgets.find(x=>x.id===id);if(!w)return;
  let displayTitle=dash.names[id]||w.title;
  let win=window.open('','DOMOS_'+id,'popup=yes,width=720,height=620,resizable=yes,scrollbars=yes');
  if(!win){toastMsg('Pop-up blocked by browser',false);return}
  let styles=[...document.querySelectorAll('style')].map(s=>s.textContent).join('\n');
- win.document.open();win.document.write(`<!doctype html><html><head><title>DOM.OS · ${displayTitle}</title><style>${styles}
+ win.document.open();win.document.write(`<!doctype html><html><head><title>DOM.OS · ${esc(displayTitle)}</title><style>${styles}
 /* V4.3 quick scratchpad + widget renaming */
 .quicknote{position:absolute;left:330px;right:205px;top:14px;height:116px;border:1px solid transparent;border-radius:12px;padding:10px 12px;transition:.2s;background:#07100c40}
 .quicknote:hover,.quicknote:focus-within{background:#08130ecc;border-color:#21382d;backdrop-filter:blur(5px)}
@@ -623,7 +658,7 @@ function popWidget(id){
 /* V5.4.3 connected dashboard summary cards */
 #availableSpendMetric{font-variant-numeric:tabular-nums}
 
-</style></head><body class="popout-shell"><div class="card"><div class="head"><h3>${displayTitle}</h3><span class="muted">DOM.OS Pop-Out</span></div>${w.body()}</div>
+</style></head><body class="popout-shell"><div class="card"><div class="head"><h3>${esc(displayTitle)}</h3><span class="muted">DOM.OS Pop-Out</span></div>${w.body()}</div>
 </body></html>`);win.document.close();
  toastMsg(`${displayTitle} popped out`,false)
 }
@@ -779,18 +814,18 @@ function updateSummary(){
 function toggleEdit(v=!edit){edit=v;document.body.classList.toggle('edit',v);$('#editbar').classList.toggle('show',v);$('#editBtn').textContent=v?'✦ Editing':'⚙ Edit Layout';renderDashboard()}
 $('#editBtn').onclick=()=>toggleEdit();$('#libBtn').onclick=()=>{library.classList.add('show');renderLibrary()}
 function renderLibrary(){libGrid.innerHTML=(quickNoteState.hidden?`<div class="libitem"><b>${quickNoteState.name||'Quick Note'}</b><p class="muted">Header scratchpad · Hidden</p><button class="btn" onclick="restoreQuickNote()">＋ Add</button></div>`:'')+widgets.map(w=>`<div class="libitem"><b>${w.title}</b><p class="muted">${dash.hidden.includes(w.id)?'Hidden':'On dashboard'}</p><button class="btn ${dash.hidden.includes(w.id)?'':'ghost'}" onclick="restoreWidget('${w.id}')">${dash.hidden.includes(w.id)?'＋ Add':'✓ Added'}</button></div>`).join('')}
-function restoreWidget(id){if(!dash.hidden.includes(id))return;snapshot('Restore widget');dash.hidden=dash.hidden.filter(x=>x!==id);persist();renderDashboard();renderLibrary();toastMsg('Widget restored')}
-function resetDashboard(){snapshot('Reset dashboard');dash={order:widgets.map(w=>w.id),hidden:['quick'],sizes:{},dims:{},names:{}};persist();renderDashboard();toastMsg('Dashboard reset')}
+function restoreWidget(id){if(!dash.hidden.includes(id))return;snapshot('Restore widget');dash.hidden=dash.hidden.filter(x=>x!==id);persist();renderDashboard();renderLibrary();toastMsg('Widget restored',true)}
+function resetDashboard(){snapshot('Reset dashboard');dash={order:widgets.map(w=>w.id),hidden:['quick'],sizes:{},dims:{},names:{}};persist();renderDashboard();toastMsg('Dashboard reset',true)}
 function renderTasks(){let q=($('#taskSearch')?.value||'').toLowerCase(),pf=$('#priorityFilter')?.value||'';['today','upcoming','completed'].forEach(st=>{let arr=tasks.filter(t=>t.status===st&&t.title.toLowerCase().includes(q)&&(!pf||t.priority===pf));let col=$('#'+st+'Col');if(!col)return;col.innerHTML=arr.map(t=>`<div class="taskcard" draggable="true" data-task="${t.id}" onclick="openTask('${t.id}')"><b>${esc(t.title)}</b><div class="sub">${esc(t.desc||t.description||'')}</div><div class="badges"><span class="badge ${t.priority==='High'?'high':''}">${t.priority}</span>${t.date?`<span class="badge">${t.date} ${t.time||''}</span>`:''}</div></div>`).join('');$('#n'+st[0].toUpperCase()+st.slice(1)).textContent=arr.length+' tasks'});bindTaskDnD()}
 function bindTaskDnD(){$$('.taskcard').forEach(c=>c.ondragstart=e=>{e.dataTransfer.setData('text/task',c.dataset.task)});$$('.colbody').forEach(c=>{c.ondragover=e=>{e.preventDefault();c.classList.add('dropover')};c.ondragleave=()=>c.classList.remove('dropover');c.ondrop=e=>{e.preventDefault();c.classList.remove('dropover');let id=e.dataTransfer.getData('text/task'),t=tasks.find(x=>x.id===id);if(!t)return;snapshot('Move task');t.status=c.parentElement.dataset.status;if(t.status==='completed')t.completedAt=Date.now();persist();renderAll();toastMsg(`Task moved to ${t.status}`)}})}
 $('#taskSearch').oninput=renderTasks;$('#priorityFilter').onchange=renderTasks;
-function openTask(id){let t=tasks.find(x=>x.id===id);if(!t)return;drawerTitle.textContent='Edit Task';drawerBody.innerHTML=`<div class="field"><label>Title</label><input id="fTitle" value="${esc(t.title)}"></div><div class="field"><label>Description</label><textarea id="fDesc">${esc(t.desc||t.description||'')}</textarea></div><div class="row"><div class="field"><label>Due date</label><input id="fDate" type="date" value="${t.date||''}"></div><div class="field"><label>Time</label><input id="fTime" type="time" value="${t.time||''}"></div></div><div class="row"><div class="field"><label>Priority</label><select id="fPri"><option ${t.priority==='Low'?'selected':''}>Low</option><option ${t.priority==='Medium'?'selected':''}>Medium</option><option ${t.priority==='High'?'selected':''}>High</option></select></div><div class="field"><label>Status</label><select id="fStatus"><option value="today" ${t.status==='today'?'selected':''}>Today</option><option value="upcoming" ${t.status==='upcoming'?'selected':''}>Upcoming</option><option value="completed" ${t.status==='completed'?'selected':''}>Completed</option></select></div></div><div class="field"><label>Subtasks (one per line)</label><textarea id="fSubs">${(t.subtasks||[]).join('\n')}</textarea></div><div style="display:flex;gap:8px"><button class="btn" onclick="saveTask('${id}')">Save</button><button class="btn ghost" onclick="duplicateTask('${id}')">Duplicate</button><button class="btn ghost" style="color:#ff8790" onclick="deleteTask('${id}')">Delete</button></div>`;drawer.classList.add('show')}
-function newTask(){let id='t'+Date.now();snapshot('New task');tasks.push({id,title:'New Task',desc:'',date:localTodayISO(),time:'',priority:'Medium',status:'today',subtasks:[]});persist();renderAll();openTask(id)}
-function saveTask(id){let t=tasks.find(x=>x.id===id);snapshot('Edit task');Object.assign(t,{title:fTitle.value,desc:fDesc.value,date:fDate.value,time:fTime.value,priority:fPri.value,status:fStatus.value,subtasks:fSubs.value.split('\n').map(x=>x.trim()).filter(Boolean)});persist();closeDrawer();renderAll();toastMsg('Task saved')}
-function deleteTask(id){snapshot('Delete task');tasks=tasks.filter(x=>x.id!==id);persist();closeDrawer();renderAll();toastMsg('Task deleted')}
-function duplicateTask(id){let t=tasks.find(x=>x.id===id);snapshot('Duplicate task');tasks.push({...structuredClone(t),id:'t'+Date.now(),title:t.title+' copy'});persist();closeDrawer();renderAll();toastMsg('Task duplicated')}
+function openTask(id){let t=tasks.find(x=>x.id===id);if(!t)return;drawerTitle.textContent='Edit Task';drawerBody.innerHTML=`<div class="field"><label>Title</label><input id="fTitle" value="${esc(t.title)}"></div><div class="field"><label>Description</label><textarea id="fDesc">${esc(t.desc||t.description||'')}</textarea></div><div class="row"><div class="field"><label>Due date</label><input id="fDate" type="date" value="${t.date||''}"></div><div class="field"><label>Time</label><input id="fTime" type="time" value="${t.time||''}"></div></div><div class="row"><div class="field"><label>Priority</label><select id="fPri"><option ${t.priority==='Low'?'selected':''}>Low</option><option ${t.priority==='Medium'?'selected':''}>Medium</option><option ${t.priority==='High'?'selected':''}>High</option></select></div><div class="field"><label>Status</label><select id="fStatus"><option value="today" ${t.status==='today'?'selected':''}>Today</option><option value="upcoming" ${t.status==='upcoming'?'selected':''}>Upcoming</option><option value="completed" ${t.status==='completed'?'selected':''}>Completed</option></select></div></div><div class="field"><label>Subtasks (one per line)</label><textarea id="fSubs">${esc((t.subtasks||[]).join('\n'))}</textarea></div><div style="display:flex;gap:8px"><button class="btn" onclick="saveTask('${id}')">Save</button><button class="btn ghost" onclick="duplicateTask('${id}')">Duplicate</button><button class="btn ghost" style="color:#ff8790" onclick="deleteTask('${id}')">Delete</button></div>`;drawer.classList.add('show')}
+function newTask(){closeDrawer();let id='t'+crypto.randomUUID();const value={id,title:'New Task',desc:'',date:localTodayISO(),time:'',priority:'Medium',status:'today',subtasks:[]};pendingDraft={kind:'tasks',id,value};tasks.push(value);openTask(id)}
+function saveTask(id){if(!validForm([['fTitle','Task title']]))return;let t=tasks.find(x=>x.id===id);snapshot('Edit task');pendingDraft=null;Object.assign(t,{title:fTitle.value,desc:fDesc.value,date:fDate.value,time:fTime.value,priority:fPri.value,status:fStatus.value,subtasks:fSubs.value.split('\n').map(x=>x.trim()).filter(Boolean)});persist();closeDrawer();renderAll();toastMsg('Task saved',true)}
+function deleteTask(id){snapshot('Delete task');tasks=tasks.filter(x=>x.id!==id);persist();closeDrawer();renderAll();toastMsg('Task deleted',true)}
+function duplicateTask(id){let t=tasks.find(x=>x.id===id);snapshot('Duplicate task');tasks.push({...structuredClone(t),id:'t'+Date.now(),title:t.title+' copy'});persist();closeDrawer();renderAll();toastMsg('Task duplicated',true)}
 function toggleTask(id){let t=tasks.find(x=>x.id===id);snapshot('Toggle task');t.status=t.status==='completed'?'today':'completed';persist();renderAll();toastMsg(t.status==='completed'?'Task completed':'Task reopened')}
-function closeDrawer(){drawer.classList.remove('show')} function esc(s){return String(s).replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;')}
+function closeDrawer(){if(pendingDraft){tasks=tasks.filter(x=>x.id!==pendingDraft.id);events=events.filter(x=>x.id!==pendingDraft.id);calendarTemplates=calendarTemplates.filter(x=>x.id!==pendingDraft.id);pendingDraft=null;renderTasks();renderCalendar()}drawer.classList.remove('show');window.dispatchEvent(new Event('domos-editor-closed'))} function esc(s){return String(s??'').replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll("'",'&#39;').replaceAll('<','&lt;').replaceAll('>','&gt;')}
 let viewDate=new Date(new Date().getFullYear(),new Date().getMonth(),1);
 function iso(y,m,d){return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`}
 function renderCalendar(){let y=viewDate.getFullYear(),m=viewDate.getMonth();calTitle.textContent=viewDate.toLocaleString('en-GB',{month:'long',year:'numeric'});weekHead.innerHTML=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(x=>`<div class="hd">${x}</div>`).join('');let first=(new Date(y,m,1).getDay()+6)%7,days=new Date(y,m+1,0).getDate(),prev=new Date(y,m,0).getDate(),cells=[];for(let i=0;i<42;i++){let d,cm=m,cy=y,dim=false;if(i<first){d=prev-first+i+1;cm=m-1;if(cm<0){cm=11;cy--}dim=true}else if(i>=first+days){d=i-first-days+1;cm=m+1;if(cm>11){cm=0;cy++}dim=true}else d=i-first+1;let date=iso(cy,cm,d);let ev=[...events.filter(e=>e.date===date).map(e=>({...e,kind:'event'})),...tasks.filter(t=>t.date===date&&t.status!=='completed').map(t=>({...t,kind:'task'})),...getRoutineOccurrences(date).map(r=>({id:r.id,title:r.name,time:r.time,kind:'routine'}))];cells.push(`<div class="day ${date===localTodayISO()?'today':''}" data-date="${date}" style="${dim?'opacity:.38':''}"><span class="daynum">${d}</span>${ev.slice(0,4).map(e=>`<div class="calevent ${e.kind==='task'?'taskev':e.kind==='routine'?'routine-cal':''}" draggable="true" data-kind="${e.kind}" data-id="${e.id}">${esc(e.time||'')} ${esc(e.title)}</div>`).join('')}</div>`)}monthGrid.innerHTML=cells.join('');let unscheduledTasks=tasks.filter(t=>!t.date&&t.status!=='completed');
@@ -825,8 +860,7 @@ function bindCalendarDnD(){
  })
 }
 function newCalendarTemplate(){
- let id='ct'+Date.now();
- calendarTemplates.push({id,title:'New Template',time:'',duration:60});persist();renderCalendar();openCalendarTemplate(id)
+ closeDrawer();let id='ct'+crypto.randomUUID();const value={id,title:'New Template',time:'',duration:60};pendingDraft={kind:'calendarTemplates',id,value};calendarTemplates.push(value);openCalendarTemplate(id)
 }
 function openCalendarTemplate(id){
  let t=calendarTemplates.find(x=>x.id===id);if(!t)return;
@@ -835,7 +869,7 @@ function openCalendarTemplate(id){
  drawer.classList.add('show')
 }
 function saveCalendarTemplate(id){
- let t=calendarTemplates.find(x=>x.id===id);if(!t)return;
+ let t=calendarTemplates.find(x=>x.id===id);if(!t)return;if(!validForm([['ctTitle','Template name']],[['ctDur','Duration',0]]))return;pendingDraft=null;
  t.title=ctTitle.value.trim()||'Untitled';t.time=ctTime.value;t.duration=Math.max(0,+ctDur.value||0);
  persist();closeDrawer();renderCalendar();toastMsg('Template saved',false)
 }
@@ -843,9 +877,9 @@ function deleteCalendarTemplate(id){
  calendarTemplates=calendarTemplates.filter(x=>x.id!==id);persist();closeDrawer();renderCalendar();toastMsg('Template deleted',false)
 }
 prevMonth.onclick=()=>{viewDate.setMonth(viewDate.getMonth()-1);renderCalendar()};nextMonth.onclick=()=>{viewDate.setMonth(viewDate.getMonth()+1);renderCalendar()};todayMonth.onclick=()=>{viewDate=new Date(new Date().getFullYear(),new Date().getMonth(),1);renderCalendar()}
-function newEvent(){let id='e'+Date.now();snapshot('New event');events.push({id,title:'New Event',date:localTodayISO(),time:'12:00',duration:60,type:'event'});persist();openEvent(id);renderCalendar()}
+function newEvent(date=localTodayISO()){closeDrawer();let id='e'+crypto.randomUUID();const value={id,title:'New Event',date,time:'12:00',duration:60,type:'event'};pendingDraft={kind:'events',id,value};events.push(value);openEvent(id)}
 function openEvent(id){let e=events.find(x=>x.id===id);drawerTitle.textContent='Edit Event';drawerBody.innerHTML=`<div class="field"><label>Title</label><input id="eTitle" value="${esc(e.title)}"></div><div class="row"><div class="field"><label>Date</label><input id="eDate" type="date" value="${e.date}"></div><div class="field"><label>Time</label><input id="eTime" type="time" value="${e.time}"></div></div><div class="field"><label>Duration (minutes)</label><input id="eDur" type="number" value="${e.duration}"></div><button class="btn" onclick="saveEvent('${id}')">Save</button> <button class="btn ghost" onclick="deleteEvent('${id}')">Delete</button>`;drawer.classList.add('show')}
-function saveEvent(id){let e=events.find(x=>x.id===id);snapshot('Edit event');Object.assign(e,{title:eTitle.value,date:eDate.value,time:eTime.value,duration:+eDur.value});persist();closeDrawer();renderAll();toastMsg('Event saved')}function deleteEvent(id){snapshot('Delete event');events=events.filter(x=>x.id!==id);persist();closeDrawer();renderAll();toastMsg('Event deleted')}
+function saveEvent(id){if(!validForm([['eTitle','Event title'],['eDate','Date']],[['eDur','Duration',0]]))return;let e=events.find(x=>x.id===id);snapshot('Edit event');pendingDraft=null;Object.assign(e,{title:eTitle.value,date:eDate.value,time:eTime.value,duration:+eDur.value});persist();closeDrawer();renderAll();toastMsg('Event saved',true)}function deleteEvent(id){snapshot('Delete event');events=events.filter(x=>x.id!==id);persist();closeDrawer();renderAll();toastMsg('Event deleted',true)}
 document.addEventListener('dblclick',e=>{let c=e.target.closest('.calevent');if(c&&c.dataset.kind==='event')openEvent(c.dataset.id);if(c&&c.dataset.kind==='task')openTask(c.dataset.id);if(c&&c.dataset.kind==='routine')openRoutine(c.dataset.id)})
 const defaults={search:'Ctrl+K',newTask:'Ctrl+T',newEvent:'Ctrl+E',editDash:'Ctrl+Shift+E',undo:'Ctrl+Z',redo:'Ctrl+Shift+Z',escape:'Escape'};
 let keys=store.get('keys',{...defaults}),recordKey=null;
@@ -856,8 +890,8 @@ document.addEventListener('keydown',e=>{if(recordKey){e.preventDefault();let c=c
 
 let renameId=null;
 function openRename(id){renameId=id;let w=widgets.find(x=>x.id===id);renameInput.value=dash.names[id]||w.title;renameModal.classList.add('show');setTimeout(()=>{renameInput.focus();renameInput.select()},20)}
-function closeRename(){renameModal.classList.remove('show');renameId=null}
-function saveRename(){if(!renameId)return;let w=widgets.find(x=>x.id===renameId),v=renameInput.value.trim();snapshot('Rename widget');if(!v||v===w.title)delete dash.names[renameId];else dash.names[renameId]=v;persist();closeRename();renderDashboard();toastMsg('Widget renamed')}
+function closeRename(){renameModal.classList.remove('show');renameId=null;window.dispatchEvent(new Event('domos-editor-closed'))}
+function saveRename(){if(!renameId)return;let w=widgets.find(x=>x.id===renameId),v=renameInput.value.trim();snapshot('Rename widget');if(!v||v===w.title)delete dash.names[renameId];else dash.names[renameId]=v;persist();closeRename();renderDashboard();toastMsg('Widget renamed',true)}
 renameInput.addEventListener('keydown',e=>{if(e.key==='Enter')saveRename();if(e.key==='Escape')closeRename()});
 const qn=document.getElementById('quickNote'),qbox=document.getElementById('quickNoteBox');
 let quickNoteState=store.get('quickNoteState',{name:'Quick Note',hidden:false,width:null,height:null});
@@ -1048,10 +1082,10 @@ async function loadBradfordWeather(){
    if(!r.ok)throw new Error('weather');
    const d=await r.json(),code=d.current.weather_code;
    art.className='greeting-weather '+weatherClass(code);
-   art.title=weatherLabel(code);
+   art.title=weatherLabel(code);return true;
  }catch(e){
    art.className='greeting-weather cloudy';
-   art.title='Bradford weather unavailable';
+   art.title='Bradford weather unavailable';return false;
  }
 }
 loadBradfordWeather();
@@ -1072,7 +1106,7 @@ function renderRoutines(){
  let host=document.getElementById('routineList');if(!host)return;
  if(!routines.length)host.innerHTML=`<div class="routine-empty"><b>No routines yet</b><p>Create a routine and choose the days it repeats. DOM.OS will then place it on your calendar.</p><button class="btn" onclick="newRoutine()">＋ Create First Routine</button></div>`;
  else host.innerHTML=routines.map(r=>`<div class="routine-card ${r.active?'':'paused'}" draggable="true" data-routine="${r.id}">
- <div class="routine-main" onclick="this.parentElement.classList.toggle('open')"><span class="routine-icon">${r.icon||'↻'}</span><div><b>${r.name}</b><div class="routine-meta">${(r.days||[]).map(x=>dayNames[dayKeys.indexOf(x)]).join(' · ')} &nbsp; ${r.time||'No time'} · ${r.duration? r.duration+' min · ':''}${(r.steps||[]).length} steps</div></div><div class="routine-actions"><button onclick="event.stopPropagation();openRoutine('${r.id}')">Edit</button><button onclick="event.stopPropagation();toggleRoutine('${r.id}')">${r.active?'Pause':'Resume'}</button></div></div>
+ <div class="routine-main" onclick="this.parentElement.classList.toggle('open')"><span class="routine-icon">${esc(r.icon||'↻')}</span><div><b>${esc(r.name)}</b><div class="routine-meta">${(r.days||[]).map(x=>dayNames[dayKeys.indexOf(x)]).join(' · ')} &nbsp; ${r.time||'No time'} · ${r.duration? r.duration+' min · ':''}${(r.steps||[]).length} steps</div></div><div class="routine-actions"><button onclick="event.stopPropagation();openRoutine('${r.id}')">Edit</button><button onclick="event.stopPropagation();toggleRoutine('${r.id}')">${r.active?'Pause':'Resume'}</button></div></div>
  <div class="routine-steps-preview">${(r.steps||[]).length?r.steps.map((s,i)=>`<div class="step-preview"><i></i><span>${i+1}. ${s.name}</span><span class="muted">${s.mode==='exact'?(s.exact||'Exact time'):s.mode==='window'?`${s.from||'…'}–${s.to||'…'}`:s.mode==='duration'?(s.minutes?s.minutes+' min':'Duration'):'After previous'}</span></div>`).join(''):'<span class="muted">No steps yet.</span>'}</div></div>`).join('');
  routineActiveCount.textContent=routines.filter(r=>r.active).length;routinePausedCount.textContent=routines.filter(r=>!r.active).length;
  routineWeek.innerHTML=dayKeys.map((d,i)=>`<div class="week-day ${routines.some(r=>r.active&&r.days?.includes(d))?'on':''}">${dayNames[i]}</div>`).join('');
@@ -1083,7 +1117,7 @@ let editingRoutineId=null,selectedRoutineDays=[];
 function buildDayPicks(){rDays.innerHTML=dayKeys.map((d,i)=>`<button type="button" class="day-pick ${selectedRoutineDays.includes(d)?'on':''}" data-day="${d}">${dayNames[i]}</button>`).join('');rDays.querySelectorAll('button').forEach(b=>b.onclick=()=>{let d=b.dataset.day;selectedRoutineDays=selectedRoutineDays.includes(d)?selectedRoutineDays.filter(x=>x!==d):[...selectedRoutineDays,d];buildDayPicks()})}
 function newRoutine(){editingRoutineId=null;selectedRoutineDays=[];routineBuilderTitle.textContent='New Routine';rName.value='';rIcon.value='↻';rActive.value='true';rTime.value='';rDuration.value='60';rStart.value='';rEnd.value='';rSteps.innerHTML='';routineDeleteBtn.style.visibility='hidden';buildDayPicks();routineModal.classList.add('show')}
 function openRoutine(id){let r=routines.find(x=>x.id===id);if(!r)return;editingRoutineId=id;selectedRoutineDays=[...(r.days||[])];routineBuilderTitle.textContent='Edit Routine';rName.value=r.name;rIcon.value=r.icon||'↻';rActive.value=String(r.active);rTime.value=r.time||'';rDuration.value=r.duration||60;rStart.value=r.start||'';rEnd.value=r.end||'';rSteps.innerHTML='';(r.steps||[]).forEach(s=>addRoutineStep(s));routineDeleteBtn.style.visibility='visible';buildDayPicks();routineModal.classList.add('show')}
-function closeRoutineBuilder(){routineModal.classList.remove('show')}
+function closeRoutineBuilder(){routineModal.classList.remove('show');window.dispatchEvent(new Event('domos-editor-closed'))}
 function routineTimingFields(d,step={}){
  let mode=d.querySelector('.rs-mode')?.value||step.mode||'after';
  let box=d.querySelector('.step-timing'); if(!box)return;
@@ -1099,11 +1133,25 @@ function addRoutineStep(step={name:'',mode:'after',minutes:'',exact:'',from:'',t
  d.querySelector('.rs-mode').onchange=()=>routineTimingFields(d,{});
  let drag=null;d.ondragstart=()=>drag=d;rSteps.ondragover=e=>e.preventDefault();rSteps.ondrop=e=>{e.preventDefault();let target=e.target.closest('.step-row');if(drag&&target&&drag!==target)rSteps.insertBefore(drag,target)}
 }
-function saveRoutine(){let name=rName.value.trim();if(!name){alert('Give the routine a name.');return}if(!selectedRoutineDays.length){alert('Choose at least one repeat day.');return}snapshot(editingRoutineId?'Edit routine':'New routine');let obj={id:editingRoutineId||'r'+Date.now(),name,icon:rIcon.value.trim()||'↻',active:rActive.value==='true',days:[...selectedRoutineDays],time:rTime.value,duration:+rDuration.value||60,start:rStart.value,end:rEnd.value,steps:[...rSteps.querySelectorAll('.step-row')].map(x=>{let mode=x.querySelector('.rs-mode').value;return{name:x.querySelector('.rs-name').value.trim(),mode,minutes:+(x.querySelector('.rs-min')?.value||0),exact:x.querySelector('.rs-exact')?.value||'',from:x.querySelector('.rs-from')?.value||'',to:x.querySelector('.rs-to')?.value||''}}).filter(x=>x.name)};if(editingRoutineId){let i=routines.findIndex(x=>x.id===editingRoutineId);routines[i]=obj}else routines.push(obj);store.set('routines',routines);closeRoutineBuilder();renderAll();renderRoutines();toastMsg('Routine saved')}
+function saveRoutine(){if(!validForm([], [['rDuration','Duration',0]]))return;let name=rName.value.trim();if(!name){alert('Give the routine a name.');return}if(!selectedRoutineDays.length){alert('Choose at least one repeat day.');return}snapshot(editingRoutineId?'Edit routine':'New routine');let obj={id:editingRoutineId||'r'+Date.now(),name,icon:rIcon.value.trim()||'↻',active:rActive.value==='true',days:[...selectedRoutineDays],time:rTime.value,duration:+rDuration.value||60,start:rStart.value,end:rEnd.value,steps:[...rSteps.querySelectorAll('.step-row')].map(x=>{let mode=x.querySelector('.rs-mode').value;return{name:x.querySelector('.rs-name').value.trim(),mode,minutes:+(x.querySelector('.rs-min')?.value||0),exact:x.querySelector('.rs-exact')?.value||'',from:x.querySelector('.rs-from')?.value||'',to:x.querySelector('.rs-to')?.value||''}}).filter(x=>x.name)};if(editingRoutineId){let i=routines.findIndex(x=>x.id===editingRoutineId);routines[i]=obj}else routines.push(obj);store.set('routines',routines);closeRoutineBuilder();renderAll();renderRoutines();toastMsg('Routine saved',true)}
 function toggleRoutine(id){snapshot('Toggle routine');let r=routines.find(x=>x.id===id);r.active=!r.active;store.set('routines',routines);renderAll();renderRoutines();toastMsg(r.active?'Routine resumed':'Routine paused')}
-function deleteCurrentRoutine(){if(!editingRoutineId)return;if(!confirm('Delete this routine?'))return;snapshot('Delete routine');routines=routines.filter(x=>x.id!==editingRoutineId);store.set('routines',routines);closeRoutineBuilder();renderAll();renderRoutines();toastMsg('Routine deleted')}
+function deleteCurrentRoutine(){if(!editingRoutineId)return;if(!confirm('Delete this routine?'))return;snapshot('Delete routine');routines=routines.filter(x=>x.id!==editingRoutineId);store.set('routines',routines);closeRoutineBuilder();renderAll();renderRoutines();toastMsg('Routine deleted',true)}
 
 
+function validForm(required=[],numbers=[]){
+ for(const [id,label] of required){const e=document.getElementById(id);if(!e?.value.trim()||!e.checkValidity()){alert(label+' is required and must be valid.');e?.focus();return false}}
+ for(const [id,label,min] of numbers){const e=document.getElementById(id),n=Number(e?.value);if(!e?.value.trim()||!Number.isFinite(n)||n<min||!e.checkValidity()){alert(label+' must be a valid number of at least '+min+'.');e?.focus();return false}}
+ return true;
+}
+function payCycleRange(now=new Date()){
+ const day=Math.max(1,Math.min(31,Number(store.get('paydayDay',28))||28));
+ const payday=(y,m)=>new Date(y,m,Math.min(day,new Date(y,m+1,0).getDate()),12);
+ const today=new Date(now.getFullYear(),now.getMonth(),now.getDate(),12);let start=payday(today.getFullYear(),today.getMonth());
+ if(start>today)start=payday(today.getFullYear(),today.getMonth()-1);
+ const end=payday(start.getFullYear(),start.getMonth()+1),format=d=>iso(d.getFullYear(),d.getMonth(),d.getDate());
+ return {start:format(start),end:format(end)};
+}
+function payCycleTransactions(){const {start,end}=payCycleRange();return transactions.filter(t=>t.date>=start&&t.date<end&&!t.internalTransfer)}
 function money(v){return '£'+Number(v||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}
 
 /* Finances */
@@ -1145,7 +1193,7 @@ function financeTotals(){
  let spent=transactions.filter(t=>t.type==='expense'&&!t.internalTransfer).reduce((s,t)=>s+(+t.amount||0),0);
  let bills=financeBills.filter(b=>!b.paid).reduce((s,b)=>s+(+b.amount||0),0);
  let reserved=financeSavings.reduce((s,g)=>s+(+g.current||0),0);
- let total=financeAccounts.length?manual:income-spent;
+ let total=financeAccounts.length?manual:income-spent;const cycle=payCycleTransactions();income=cycle.filter(t=>t.type==='income').reduce((sum,t)=>sum+Number(t.amount||0),0);spent=cycle.filter(t=>t.type==='expense').reduce((sum,t)=>sum+Number(t.amount||0),0);
  let safe=Math.max(0,total-bills-reserved);
  return {total,income,spent,bills,reserved,safe}
 }
@@ -1168,11 +1216,11 @@ function renderFinance(){
  } else if(financeTab==='accounts'){
   financeContent.innerHTML=`<div class="fin-grid"><div class="card fin-card fin-span-12"><div class="head"><h3>Connected & Manual Accounts</h3><button class="btn" onclick="openFinanceAccount()">＋ Account</button></div>${financeAccounts.length?financeAccounts.map(a=>`<div class="fin-account"><div class="bank"><span class="bank-dot">${esc((a.bank||'?')[0])}</span><div><b>${esc(a.name)}</b><div class="fin-muted">${esc(a.bank)} · ${esc(a.type||'Current')} · ${a.source==='bank'?'Connected':'Manual / connection-ready'}</div></div></div><div><b>${money(a.balance)}</b> <button class="btn ghost" onclick="openFinanceAccount('${a.id}')">Edit</button></div></div>`).join(''):`<div class="fin-empty">No accounts yet. Add your Monzo and Halifax accounts as manual placeholders; later the secure bank connection can update their balances and transactions.</div>`}</div></div>`
  } else if(financeTab==='budget'){
-  financeContent.innerHTML=`<div class="fin-grid"><div class="card fin-card fin-span-8"><div class="head"><h3>Category Budgets</h3><button class="btn" onclick="openFinanceBudget()">＋ Budget</button></div>${financeBudgets.length?financeBudgets.map(b=>{let spent=transactions.filter(t=>t.type==='expense'&&t.category===b.category).reduce((s,x)=>s+(+x.amount||0),0),pc=Math.min(100,b.limit?spent/b.limit*100:0);return `<div class="fin-account"><div style="flex:1"><b>${esc(b.category)}</b><div class="fin-progress"><i style="width:${pc}%"></i></div><div class="fin-muted">${money(spent)} of ${money(b.limit)} · ${money(Math.max(0,b.limit-spent))} left</div></div><button class="btn ghost" onclick="openFinanceBudget('${b.id}')">Edit</button></div>`}).join(''):`<div class="fin-empty">Create budgets for food, fuel, entertainment, shopping or any category you want.</div>`}</div><div class="card fin-card fin-span-4"><h3>Budget summary</h3><p class="fin-muted">Budgets use the same transaction categories that future bank imports will use.</p></div></div>`
+  financeContent.innerHTML=`<div class="fin-grid"><div class="card fin-card fin-span-8"><div class="head"><h3>Category Budgets</h3><button class="btn" onclick="openFinanceBudget()">＋ Budget</button></div>${financeBudgets.length?financeBudgets.map(b=>{let spent=payCycleTransactions().filter(t=>t.type==='expense'&&t.category===b.category).reduce((s,x)=>s+(+x.amount||0),0),pc=Math.min(100,b.limit?spent/b.limit*100:0);return `<div class="fin-account"><div style="flex:1"><b>${esc(b.category)}</b><div class="fin-progress"><i style="width:${pc}%"></i></div><div class="fin-muted">${money(spent)} of ${money(b.limit)} · ${money(Math.max(0,b.limit-spent))} left</div></div><button class="btn ghost" onclick="openFinanceBudget('${b.id}')">Edit</button></div>`}).join(''):`<div class="fin-empty">Create budgets for food, fuel, entertainment, shopping or any category you want.</div>`}</div><div class="card fin-card fin-span-4"><h3>Budget summary</h3><p class="fin-muted">Budgets use the same transaction categories that future bank imports will use.</p></div></div>`
  } else if(financeTab==='transactions'){
   financeContent.innerHTML=`<div class="card fin-card"><div class="head"><h3>All Transactions</h3><button class="btn" onclick="openTransaction()">＋ Transaction</button></div><div class="fin-filter">${accountFilter}<select id="finTypeFilter" onchange="renderFinanceTransactions($('#finAccountFilter').value)"><option value="">Income & expenses</option><option value="income">Income</option><option value="expense">Expenses</option></select></div><div id="financeTxRows"></div></div>`;renderFinanceTransactions('')
  } else if(financeTab==='bills'){
-  financeContent.innerHTML=`<div class="fin-grid"><div class="card fin-card fin-span-12"><div class="head"><h3>Bills & Subscriptions</h3><button class="btn" onclick="openFinanceBill()">＋ Bill</button></div>${financeBills.length?financeBills.map(b=>`<div class="fin-row"><div><b>${esc(b.name)}</b><div class="fin-muted">${finAccountName(b.accountId)}</div></div><span>${esc(b.due||'No date')}</span><span>${b.paid?'Paid':'Due'}</span><b>${money(b.amount)}</b></div>`).join(''):`<div class="fin-empty">Add recurring bills and subscriptions so Safe to Spend excludes money already committed.</div>`}</div></div>`
+  financeContent.innerHTML=`<div class="fin-grid"><div class="card fin-card fin-span-12"><div class="head"><h3>Bills & Subscriptions</h3><button class="btn" onclick="openFinanceBill()">＋ Bill</button></div>${financeBills.length?financeBills.map(b=>`<div class="fin-row"><div><b>${esc(b.name)}</b><div class="fin-muted">${esc(finAccountName(b.accountId))}</div></div><span>${esc(b.due||'No date')}</span><span>${b.paid?'Paid':'Due'}</span><div><b>${money(b.amount)}</b> <button class="btn ghost" onclick="openFinanceBill('${b.id}')">Edit</button> <button class="btn ghost" onclick="toggleFinanceBill('${b.id}')">${b.paid?'Mark unpaid':'Mark paid'}</button></div></div>`).join(''):`<div class="fin-empty">Add recurring bills and subscriptions so Safe to Spend excludes money already committed.</div>`}</div></div>`
  } else if(financeTab==='savings'){
   financeContent.innerHTML=`<div class="fin-grid"><div class="card fin-card fin-span-12"><div class="head"><h3>Savings Goals & Pots</h3><button class="btn" onclick="openFinanceSaving()">＋ Saving Goal</button></div>${financeSavings.length?financeSavings.map(g=>{let pc=Math.min(100,g.target?g.current/g.target*100:0);return `<div class="fin-account"><div style="flex:1"><b>${esc(g.name)}</b><div class="fin-progress"><i style="width:${pc}%"></i></div><div class="fin-muted">${money(g.current)} of ${money(g.target)} · ${Math.round(pc)}%</div></div><button class="btn ghost" onclick="openFinanceSaving('${g.id}')">Edit</button></div>`}).join(''):`<div class="fin-empty">Create separate savings goals or pots. Money marked as saved is excluded from Safe to Spend.</div>`}</div></div>`
  } else {
@@ -1183,27 +1231,38 @@ function renderFinance(){
 function renderFinanceTransactions(accountId=''){
  let el=$('#financeTxRows');if(!el)return;let type=$('#finTypeFilter')?.value||'';
  let rows=transactions.filter(t=>(!accountId||t.accountId===accountId)&&(!type||t.type===type)).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
- el.innerHTML=rows.length?rows.map(t=>`<div class="fin-row"><div><b>${esc(t.description||t.category||'Transaction')}</b><div class="fin-muted">${esc(t.category||'Other')} · ${finAccountName(t.accountId)}</div></div><span>${esc(t.date||'')}</span><span>${t.internalTransfer?'Transfer':esc(t.type)}</span><b class="${t.type==='income'?'fin-positive':'fin-negative'}">${t.type==='income'?'+':'−'}${money(t.amount)}</b></div>`).join(''):`<div class="fin-empty">No matching transactions.</div>`
+ el.innerHTML=rows.length?rows.map(t=>`<div class="fin-row"><div><b>${esc(t.description||t.category||'Transaction')}</b><div class="fin-muted">${esc(t.category||'Other')} · ${esc(finAccountName(t.accountId))}</div></div><span>${esc(t.date||'')}</span><span>${t.internalTransfer?'Transfer':esc(t.type)}</span><b class="${t.type==='income'?'fin-positive':'fin-negative'}">${t.type==='income'?'+':'−'}${money(t.amount)}</b><button class="btn ghost" onclick="openTransaction('${t.id}')">Edit</button></div>`).join(''):`<div class="fin-empty">No matching transactions.</div>`
 }
 function openFinanceAccount(id){
  let a=financeAccounts.find(x=>x.id===id)||{name:'',bank:'',type:'Current',balance:0,source:'manual'};
  drawerTitle.textContent=id?'Edit Account':'Add Account';
  drawerBody.innerHTML=`<div class="field"><label>Account name</label><input id="faName" value="${esc(a.name)}" placeholder="e.g. Monzo Current"></div><div class="row"><div class="field"><label>Bank</label><input id="faBank" value="${esc(a.bank)}" placeholder="Monzo / Halifax"></div><div class="field"><label>Type</label><select id="faType"><option>Current</option><option>Savings</option><option>Credit</option></select></div></div><div class="field"><label>Current balance</label><input id="faBalance" type="number" step=".01" value="${a.balance}"></div><p class="muted">Manual for now. This account is structured so a secure bank connection can update it later.</p><button class="btn" onclick="saveFinanceAccount('${id||''}')">Save Account</button>${id?` <button class="btn ghost" onclick="deleteFinanceAccount('${id}')">Delete</button>`:''}`;drawer.classList.add('show');faType.value=a.type||'Current'
 }
-function saveFinanceAccount(id){let a=id?financeAccounts.find(x=>x.id===id):null;if(!a){a={id:'fa'+Date.now(),source:'manual'};financeAccounts.push(a)}Object.assign(a,{name:faName.value.trim()||'Account',bank:faBank.value.trim()||'Other',type:faType.value,balance:+faBalance.value||0});persist();closeDrawer();renderFinance();toastMsg('Account saved',false)}
+function saveFinanceAccount(id){if(!validForm([['faName','Account name']],[['faBalance','Balance',-Number.MAX_VALUE]]))return;let a=id?financeAccounts.find(x=>x.id===id):null;if(!a){a={id:'fa'+Date.now(),source:'manual'};financeAccounts.push(a)}Object.assign(a,{name:faName.value.trim()||'Account',bank:faBank.value.trim()||'Other',type:faType.value,balance:+faBalance.value||0});persist();closeDrawer();renderFinance();toastMsg('Account saved',false)}
 function deleteFinanceAccount(id){financeAccounts=financeAccounts.filter(x=>x.id!==id);persist();closeDrawer();renderFinance();toastMsg('Account removed',false)}
-function openFinanceBudget(id){let b=financeBudgets.find(x=>x.id===id)||{category:'Food',limit:0};drawerTitle.textContent=id?'Edit Budget':'New Budget';drawerBody.innerHTML=`<div class="field"><label>Category</label><input id="fbCat" value="${esc(b.category)}"></div><div class="field"><label>Pay-cycle budget</label><input id="fbLimit" type="number" step=".01" value="${b.limit}"></div><button class="btn" onclick="saveFinanceBudget('${id||''}')">Save Budget</button>`;drawer.classList.add('show')}
-function saveFinanceBudget(id){let b=id?financeBudgets.find(x=>x.id===id):null;if(!b){b={id:'fb'+Date.now()};financeBudgets.push(b)}b.category=fbCat.value.trim()||'Other';b.limit=+fbLimit.value||0;persist();closeDrawer();renderFinance()}
-function openFinanceBill(){drawerTitle.textContent='Add Bill / Subscription';drawerBody.innerHTML=`<div class="field"><label>Name</label><input id="fblName"></div><div class="row"><div class="field"><label>Amount</label><input id="fblAmount" type="number" step=".01"></div><div class="field"><label>Due date</label><input id="fblDue" type="date"></div></div><div class="field"><label>Paid from</label><select id="fblAccount"><option value="">Unassigned</option>${financeAccounts.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></div><button class="btn" onclick="saveFinanceBill()">Save Bill</button>`;drawer.classList.add('show')}
-function saveFinanceBill(){financeBills.push({id:'bill'+Date.now(),name:fblName.value.trim()||'Bill',amount:+fblAmount.value||0,due:fblDue.value,accountId:fblAccount.value,paid:false});persist();closeDrawer();renderFinance()}
-function openFinanceSaving(id){let g=financeSavings.find(x=>x.id===id)||{name:'',current:0,target:0};drawerTitle.textContent=id?'Edit Saving Goal':'New Saving Goal';drawerBody.innerHTML=`<div class="field"><label>Name</label><input id="fsName" value="${esc(g.name)}"></div><div class="row"><div class="field"><label>Saved</label><input id="fsCurrent" type="number" step=".01" value="${g.current}"></div><div class="field"><label>Target</label><input id="fsTarget" type="number" step=".01" value="${g.target}"></div></div><button class="btn" onclick="saveFinanceSaving('${id||''}')">Save Goal</button>`;drawer.classList.add('show')}
-function saveFinanceSaving(id){let g=id?financeSavings.find(x=>x.id===id):null;if(!g){g={id:'save'+Date.now()};financeSavings.push(g)}g.name=fsName.value.trim()||'Savings';g.current=+fsCurrent.value||0;g.target=+fsTarget.value||0;persist();closeDrawer();renderFinance()}
+function openFinanceBudget(id){let b=financeBudgets.find(x=>x.id===id)||{category:'Food',limit:0};drawerTitle.textContent=id?'Edit Budget':'New Budget';drawerBody.innerHTML=`<div class="field"><label>Category</label><input id="fbCat" value="${esc(b.category)}"></div><div class="field"><label>Pay-cycle budget</label><input id="fbLimit" type="number" step=".01" value="${b.limit}"></div><button class="btn" onclick="saveFinanceBudget('${id||''}')">Save Budget</button>${id?` <button class="btn ghost" onclick="deleteFinanceRecord('financeBudgets','${id}')">Delete</button>`:''}`;drawer.classList.add('show')}
+function saveFinanceBudget(id){if(!validForm([['fbCat','Category']],[['fbLimit','Budget',0]]))return;let b=id?financeBudgets.find(x=>x.id===id):null;if(!b){b={id:'fb'+Date.now()};financeBudgets.push(b)}b.category=fbCat.value.trim()||'Other';b.limit=+fbLimit.value||0;persist();closeDrawer();renderFinance()}
+function openFinanceBill(id=''){const bill=financeBills.find(x=>x.id===id);drawerTitle.textContent=bill?'Edit Bill / Subscription':'Add Bill / Subscription';drawerBody.innerHTML=`<div class="field"><label>Name</label><input id="fblName"></div><div class="row"><div class="field"><label>Amount</label><input id="fblAmount" type="number" step=".01"></div><div class="field"><label>Due date</label><input id="fblDue" type="date"></div></div><div class="field"><label>Paid from</label><select id="fblAccount"><option value="">Unassigned</option>${financeAccounts.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></div><button class="btn" onclick="saveFinanceBill('${id}')">Save Bill</button>${bill?` <button class="btn ghost" onclick="deleteFinanceRecord('financeBills','${id}')">Delete</button>`:''}`;drawer.classList.add('show');if(bill){fblName.value=bill.name;fblAmount.value=bill.amount;fblDue.value=bill.due;fblAccount.value=bill.accountId||''}}
+function saveFinanceBill(id=''){if(!validForm([['fblName','Bill name']],[['fblAmount','Amount',0]]))return;let bill=financeBills.find(x=>x.id===id);if(!bill){bill={id:'bill'+crypto.randomUUID(),paid:false};financeBills.push(bill)}Object.assign(bill,{name:fblName.value.trim(),amount:Number(fblAmount.value),due:fblDue.value,accountId:fblAccount.value});persist();closeDrawer();renderFinance();renderDashboard()}
+function toggleFinanceBill(id){const bill=financeBills.find(x=>x.id===id);if(!bill)return;bill.paid=!bill.paid;persist();renderFinance();renderDashboard()}
+function deleteFinanceRecord(kind,id){
+ if(!confirm('Delete this record?'))return;
+ if(kind==='transactions'){transactions=transactions.filter(x=>x.id!==id);store.set('transactions',transactions)}
+ else if(kind==='financeBills')financeBills=financeBills.filter(x=>x.id!==id);
+ else if(kind==='financeBudgets')financeBudgets=financeBudgets.filter(x=>x.id!==id);
+ else if(kind==='financeSavings')financeSavings=financeSavings.filter(x=>x.id!==id);
+ else return;
+ persist();closeDrawer();renderFinance();renderDashboard();toastMsg('Record deleted',false);
+}
+
+function openFinanceSaving(id){let g=financeSavings.find(x=>x.id===id)||{name:'',current:0,target:0};drawerTitle.textContent=id?'Edit Saving Goal':'New Saving Goal';drawerBody.innerHTML=`<div class="field"><label>Name</label><input id="fsName" value="${esc(g.name)}"></div><div class="row"><div class="field"><label>Saved</label><input id="fsCurrent" type="number" step=".01" value="${g.current}"></div><div class="field"><label>Target</label><input id="fsTarget" type="number" step=".01" value="${g.target}"></div></div><button class="btn" onclick="saveFinanceSaving('${id||''}')">Save Goal</button>${id?` <button class="btn ghost" onclick="deleteFinanceRecord('financeSavings','${id}')">Delete</button>`:''}`;drawer.classList.add('show')}
+function saveFinanceSaving(id){if(!validForm([['fsName','Savings name']],[['fsCurrent','Saved amount',0],['fsTarget','Target',0]]))return;let g=id?financeSavings.find(x=>x.id===id):null;if(!g){g={id:'save'+Date.now()};financeSavings.push(g)}g.name=fsName.value.trim()||'Savings';g.current=+fsCurrent.value||0;g.target=+fsTarget.value||0;persist();closeDrawer();renderFinance()}
 function openTransaction(id){
  let t=id?transactions.find(x=>x.id===id):null;t=t||{type:'expense',amount:0,description:'',category:'Other',date:localTodayISO(),accountId:'',internalTransfer:false};
  drawerTitle.textContent=id?'Edit Transaction':'Add Transaction';
- drawerBody.innerHTML=`<div class="row"><div class="field"><label>Type</label><select id="txType"><option value="expense">Expense</option><option value="income">Income</option></select></div><div class="field"><label>Amount</label><input id="txAmount" type="number" step=".01" value="${t.amount}"></div></div><div class="field"><label>Description</label><input id="txDesc" value="${esc(t.description||'')}"></div><div class="row"><div class="field"><label>Category</label><input id="txCategory" value="${esc(t.category||'Other')}"></div><div class="field"><label>Date</label><input id="txDate" type="date" value="${t.date||localTodayISO()}"></div></div><div class="field"><label>Account</label><select id="txAccount"><option value="">Unassigned</option>${financeAccounts.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></div><div class="field"><label><input id="txTransfer" type="checkbox" ${t.internalTransfer?'checked':''}> Internal transfer between my accounts</label></div><button class="btn" onclick="saveTransaction('${id||''}')">Save Transaction</button>`;drawer.classList.add('show');txType.value=t.type;txAccount.value=t.accountId||''
+ drawerBody.innerHTML=`<div class="row"><div class="field"><label>Type</label><select id="txType"><option value="expense">Expense</option><option value="income">Income</option></select></div><div class="field"><label>Amount</label><input id="txAmount" type="number" step=".01" value="${t.amount}"></div></div><div class="field"><label>Description</label><input id="txDesc" value="${esc(t.description||'')}"></div><div class="row"><div class="field"><label>Category</label><input id="txCategory" value="${esc(t.category||'Other')}"></div><div class="field"><label>Date</label><input id="txDate" type="date" value="${t.date||localTodayISO()}"></div></div><div class="field"><label>Account</label><select id="txAccount"><option value="">Unassigned</option>${financeAccounts.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></div><div class="field"><label><input id="txTransfer" type="checkbox" ${t.internalTransfer?'checked':''}> Internal transfer between my accounts</label></div><button class="btn" onclick="saveTransaction('${id||''}')">Save Transaction</button>${id?` <button class="btn ghost" onclick="deleteFinanceRecord('transactions','${id}')">Delete</button>`:''}`;drawer.classList.add('show');txType.value=t.type;txAccount.value=t.accountId||''
 }
-function saveTransaction(id){let t=id?transactions.find(x=>x.id===id):null;if(!t){t={id:'tx'+Date.now()};transactions.push(t)}Object.assign(t,{type:txType.value,amount:+txAmount.value||0,description:txDesc.value.trim(),category:txCategory.value.trim()||'Other',date:txDate.value,accountId:txAccount.value,internalTransfer:txTransfer.checked});store.set('transactions',transactions);closeDrawer();renderFinance();renderDashboard();toastMsg('Transaction saved',false)}
+function saveTransaction(id){if(!validForm([['txDate','Date'],['txCategory','Category']],[['txAmount','Amount',0.01]]))return;let t=id?transactions.find(x=>x.id===id):null;if(!t){t={id:'tx'+Date.now()};transactions.push(t)}Object.assign(t,{type:txType.value,amount:+txAmount.value||0,description:txDesc.value.trim(),category:txCategory.value.trim()||'Other',date:txDate.value,accountId:txAccount.value,internalTransfer:txTransfer.checked});store.set('transactions',transactions);closeDrawer();renderFinance();renderDashboard();toastMsg('Transaction saved',false)}
 function renderGoals(){
  let host=document.getElementById('goalList');if(!host)return;
  let sorted=[...goals].sort((a,b)=>(a.progress>=100)-(b.progress>=100)||(a.date||'9999').localeCompare(b.date||'9999'));

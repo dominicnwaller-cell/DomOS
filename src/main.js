@@ -20,7 +20,7 @@ function emit(){ const value=snapshot(); for(const listener of listeners){ try{l
 
 async function loadCurrentVersion(){
   try{ state.currentVersion = await getVersion(); }
-  catch(error){ console.warn('Could not read DOM.OS version:', error); state.currentVersion='6.1.1'; }
+  catch(error){ console.warn('Could not read DOM.OS version:', error); state.currentVersion='6.1.3'; }
   emit();
 }
 

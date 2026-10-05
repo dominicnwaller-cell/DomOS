@@ -31,6 +31,9 @@ jobs:
       - name: Validate DOM.OS
         run: npm run validate
 
+      - name: Test DOM.OS workflows
+        run: npm test
+
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -41,7 +44,14 @@ jobs:
         with:
           tagName: v${{ github.event.inputs.version }}
           releaseName: DOM.OS v${{ github.event.inputs.version }}
-          releaseBody: "DOM.OS update"
+          releaseBody: |
+            - Work Deadlines includes undated upcoming tasks; removed Open Finances button.
+            - Finance edit/delete and bill paid controls; consistent payday-cycle spending and budgets.
+            - Cancelled editors no longer save placeholder tasks, events or templates.
+            - Midnight timer tracking and truthful weather refresh status.
+            - Broader cross-window synchronization with conflict protection for concurrent saves.
+            - Stronger form and backup validation, backup rollback, and literal text rendering.
+            - Clear updater states and inline download/install progress.
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
