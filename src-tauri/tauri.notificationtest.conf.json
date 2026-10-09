@@ -1,0 +1,43 @@
+{
+  "identifier": "com.dom.os.notificationtest",
+  "productName": "DOM.OS Notification Test",
+  "app": {
+    "windows": [
+      {
+        "title": "DOM.OS Notification Test \u2014 Isolated",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 360,
+        "minHeight": 640,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "capabilities": [
+        "main-capability",
+        "popout-capability",
+        {
+          "identifier": "notification-test-layout",
+          "windows": [
+            "main"
+          ],
+          "permissions": [
+            "core:window:allow-set-size"
+          ]
+        }
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

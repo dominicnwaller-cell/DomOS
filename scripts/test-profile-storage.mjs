@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {ProfileStorage} from '../src/data/storage.js';
+const snapshot={profile:{id:'profile-a',revision:0},data:{'lifeos4.tasks':'[]'}};
+const commits=[];const states=[];
+const store=new ProfileStorage(structuredClone(snapshot),async(id,revision,changes)=>{commits.push({id,revision,changes});return revision+1},s=>states.push(s));
+store.setItem('lifeos4.tasks','[{"id":"new"}]');store.setItem('lifeos4.notes','[]');await store.flush();assert.equal(commits.length,1);assert.equal(store.profile.revision,1);assert.equal(commits[0].id,'profile-a');assert.equal(Object.keys(commits[0].changes).length,2);assert.equal(states.at(-1),'saved');
+const other=new ProfileStorage({profile:{id:'profile-b',revision:0},data:{}},async()=>1);assert.equal(other.getItem('lifeos4.tasks'),null);
+const failed=new ProfileStorage(structuredClone(snapshot),async()=>{throw new Error('disk failed')});failed.setItem('lifeos4.tasks','[{"id":"retained"}]');await assert.rejects(()=>failed.flush(),/disk failed/);assert(failed.recovery().data['lifeos4.tasks'].includes('retained'));assert.throws(()=>failed.setItem('lifeos4.notes','[]'),/paused/);
+const stale={profile:{id:'profile-a',revision:1},data:{'lifeos4.tasks':'[]'}};store.setItem('lifeos4.tasks','[{"id":"newer"}]');assert.equal(await store.acceptSnapshot(stale),null);assert.equal(store.profile.revision,2);assert(store.getItem('lifeos4.tasks').includes('newer'));await assert.rejects(()=>store.acceptSnapshot({profile:{id:'profile-b',revision:3},data:{}}),/another profile/);
+console.log('PASS profile adapter: atomic batching, acknowledged revisions, isolation, unsaved recovery and stale-snapshot rejection');

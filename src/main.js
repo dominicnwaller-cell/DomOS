@@ -2,6 +2,9 @@ import { check } from '@tauri-apps/plugin-updater';
 import { getVersion } from '@tauri-apps/api/app';
 import { initV612 } from './v612-ui.js';
 import './v612.css';
+import {bootstrap} from './app/bootstrap.js';
+import {storage as localStorage} from './data/storage.js';
+import legacySource from './app/legacy.js?raw';
 
 let pendingUpdate = null;
 let checking = false;
@@ -20,7 +23,7 @@ function emit(){ const value=snapshot(); for(const listener of listeners){ try{l
 
 async function loadCurrentVersion(){
   try{ state.currentVersion = await getVersion(); }
-  catch(error){ console.warn('Could not read DOM.OS version:', error); state.currentVersion='6.1.3'; }
+  catch(error){ console.warn('Could not read DOM.OS version:', error); state.currentVersion='6.2.0'; }
   emit();
 }
 
@@ -60,10 +63,19 @@ window.DOMOSUpdater={
   subscribe(listener){ listeners.add(listener); listener(snapshot()); return ()=>listeners.delete(listener); }
 };
 
-window.addEventListener('DOMContentLoaded',async()=>{
+async function startProfile(){
+  state.lastChecked=localStorage.getItem('domos612.lastUpdateCheck')||'';
+  const script=document.createElement('script');script.textContent=legacySource;document.body.append(script);
   await loadCurrentVersion();
   initV612();
   const isPopout=new URLSearchParams(location.search).has('domosPopout');
   const autoCheck=localStorage.getItem('domos612.autoCheck')!=='false';
-  if(!isPopout&&autoCheck) setTimeout(()=>checkForUpdates(true),2500);
-});
+  if(!isPopout&&autoCheck&&import.meta.env.VITE_DOMOS_NATIVE_VERIFY!=='1') setTimeout(()=>checkForUpdates(true),2500);
+}
+const boot=async()=>{
+ if(import.meta.env.VITE_DOMOS_NATIVE_VERIFY==='1'){
+  const {verifyNativeFoundation}=await import('./testing/native-foundation.js');
+  await verifyNativeFoundation(()=>bootstrap(startProfile));
+ }else if(import.meta.env.VITE_DOMOS_NOTIFICATION_ACCEPTANCE==='1'){const {prepareNotificationAcceptance,installNotificationAcceptance}=await import('./testing/notification-acceptance.js');await prepareNotificationAcceptance();await bootstrap(startProfile);installNotificationAcceptance();}else await bootstrap(startProfile);
+};
+if(document.readyState==='loading')window.addEventListener('DOMContentLoaded',boot,{once:true});else boot();

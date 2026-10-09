@@ -1,0 +1,34 @@
+{
+  "identifier": "com.dom.os.nativeverify",
+  "productName": "DOM.OS Native Verification",
+  "app": {
+    "windows": [
+      {
+        "title": "DOM.OS Native Verification",
+        "width": 1100,
+        "height": 800,
+        "minWidth": 360,
+        "minHeight": 640,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "capabilities": [
+        "main-capability",
+        {
+          "identifier": "native-verification-sizing",
+          "windows": [
+            "main"
+          ],
+          "permissions": [
+            "core:window:allow-set-size",
+            "core:webview:allow-set-webview-zoom"
+          ]
+        }
+      ]
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}

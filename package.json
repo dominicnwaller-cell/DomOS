@@ -1,14 +1,15 @@
 {
   "name": "domos",
   "private": true,
-  "version": "6.1.3",
+  "version": "6.2.0",
   "scripts": {
     "frontend:build": "vite build",
     "tauri": "tauri",
-    "dev": "tauri dev",
+    "dev": "tauri dev --config src-tauri/tauri.dev62.conf.json",
     "build": "npm run validate && tauri build",
     "validate": "node scripts/validate-domos.mjs",
-    "test": "node scripts/audit-app.mjs"
+    "test": "node scripts/test-finance-remediation.mjs && node scripts/test-finance.mjs && node scripts/test-finance-ui.mjs && node scripts/test-migration.mjs && node scripts/test-profile-storage.mjs && node scripts/test-fresh-profile.mjs && node scripts/test-profile-windows.mjs && node scripts/test-assistant.mjs && node scripts/test-life-tracking.mjs && node scripts/test-timeline-refinement.mjs && node scripts/test-goals.mjs && node scripts/test-goals-ui.mjs && node scripts/test-habits-trackers.mjs && node scripts/test-tracking-ui.mjs && node scripts/test-reviews.mjs && node scripts/test-reviews-ui.mjs && node scripts/test-notifications.mjs && node scripts/test-notifications-ui.mjs && node scripts/audit-app.mjs",
+    "test:native": "cargo test --lib --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.1",

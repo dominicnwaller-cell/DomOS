@@ -1,0 +1,6 @@
+{
+  "identifier":"com.dom.os.dev62",
+  "productName":"DOM.OS 6.2 Development",
+  "app":{"windows":[{"title":"DOM.OS 6.2 Development","width":1440,"height":900,"minWidth":360,"minHeight":640,"resizable":true,"dragDropEnabled":false}]},
+  "bundle":{"active":false}
+}

@@ -8,6 +8,7 @@ const fail = msg => {
 const read = path => fs.readFileSync(path, 'utf8').replace(/^\uFEFF/, '');
 
 const html = read('src/index.html');
+const legacy = read('src/app/legacy.js');
 const main = read('src/main.js');
 const ui = read('src/v612-ui.js');
 const css = read('src/v612.css');
@@ -17,16 +18,16 @@ const tauri = JSON.parse(read('src-tauri/tauri.conf.json'));
 const capability = JSON.parse(read('src-tauri/capabilities/default.json'));
 const cargo = read('src-tauri/Cargo.toml');
 
-const tag = '<script type="module" src="/main.js"></script>';
+const tag = '<script type="module" src="/main.js"';
 if ((html.split(tag).length - 1) !== 1)
   fail('Updater script must appear exactly once');
 
-const marker = html.indexOf('DOM.OS Pop-Out');
-const start = html.lastIndexOf('win.document.write(`', marker);
-const end = html.indexOf('`);win.document.close();', marker);
+const marker = legacy.indexOf('DOM.OS Pop-Out');
+const start = legacy.lastIndexOf('win.document.write(`', marker);
+const end = legacy.indexOf('`);win.document.close();', marker);
 if (marker < 0 || start < 0 || end < 0) {
   fail('Could not locate legacy widget pop-out template');
-} else if (html.slice(start, end).includes('<script')) {
+} else if (legacy.slice(start, end).includes('<script')) {
   fail('Script tag found inside the widget pop-out template');
 }
 
@@ -39,7 +40,7 @@ for (const required of [
   'function renderGoals()',
   'renderAll();'
 ]) {
-  if (!html.includes(required)) fail(`Core DOM.OS application code missing: ${required}`);
+  if (!legacy.includes(required)) fail(`Core DOM.OS application code missing: ${required}`);
 }
 
 if (!main.includes("@tauri-apps/plugin-updater"))

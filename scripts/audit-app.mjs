@@ -5,13 +5,14 @@ import assert from 'node:assert/strict';
 const errors=[];
 const vc=new VirtualConsole();
 vc.on('jsdomError',e=>errors.push(e.message));
-const dom=new JSDOM(readFileSync('src/index.html','utf8'),{
+const fixtureHTML=readFileSync('src/index.html','utf8').replace('</body>',()=>`<script>${readFileSync('src/app/legacy.js','utf8')}</script></body>`);
+const dom=new JSDOM(fixtureHTML,{
   url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true,virtualConsole:vc,
-  beforeParse(w){w.structuredClone=structuredClone;w.fetch=async()=>({json:async()=>({current:{temperature_2m:12,weather_code:3}})});w.confirm=()=>true;w.alert=()=>{};w.prompt=()=>null;}
+  beforeParse(w){w.DOMOSStorage=w.localStorage;w.DOMOSProfile={id:'11111111-1111-4111-8111-111111111111',name:'Audit',preferences:{currency:'GBP',location:{name:'Test city',latitude:50,longitude:0}}};w.localStorage.setItem('lifeos4.tasks',JSON.stringify([{id:'test-work-task-v551',title:'Test Work Task',status:'upcoming',priority:'Medium',date:''}]));w.localStorage.setItem('lifeos4.routines',JSON.stringify([{id:'test-routine',name:'Generic test routine',active:true,days:['mon','tue','wed','thu','fri','sat','sun'],time:'09:00',duration:15,steps:[{name:'Test step',mode:'duration',minutes:15}]}]));w.localStorage.setItem('lifeos4.paydayDay','28');w.structuredClone=structuredClone;w.fetch=async()=>({ok:true,json:async()=>({current:{temperature_2m:12,weather_code:3}})});w.confirm=()=>true;w.alert=()=>{};w.prompt=()=>null;}
 });
 const w=dom.window,d=w.document;
 w.DOMOSUpdater={getState:()=>({currentVersion:'6.1.2',status:'up-to-date'}),subscribe:()=>()=>{}};
-const ui=readFileSync('src/v612-ui.js','utf8').replace(/^import .*;\r?\n/,'').replace('export function initV612','function initV612');
+const ui=readFileSync('src/v612-ui.js','utf8').replace(/^import .*;\r?\n/gm,'').replace('export function initV612','function initV612');
 w.eval(`(()=>{${ui}\nwindow.audit={timerAction,readTimer,timerTotals,backupPayload,financeSnapshot,daysToPayday,renderSettings,validateBackup,restoreBackup};initV612();})()`);
 const run=code=>w.eval(code);
 const field=(id,value)=>{d.getElementById(id).value=value;};
